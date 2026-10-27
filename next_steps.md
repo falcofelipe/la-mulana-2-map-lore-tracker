@@ -44,7 +44,20 @@ An Excel `.xlsx` file is actually a standard ZIP archive containing:
 
 ---
 
-## 3. Automated Unit & Integration Test Suite
+## 3. Cross-Cell Map Grid Arrows (Room-to-Room Passages & Connections)
+**Goal:** Allow drawing directional arrows directly on the **Macro Map Grid** that span from one cell to another (e.g., showing a passage from `$C$1` into `$C$2`, a one-way drop between rooms, or a warp connection across the grid).
+
+### Implementation Details
+- **Data Model (`MapConnectionArrow` on `MapPage`):**
+  - Store `fromCellId` + `(fromXPercent, fromYPercent)` and `toCellId` + `(toXPercent, fromYPercent)` alongside `color`, `dashed`, `bidirectional`, and optional `label`.
+  - Because endpoints reference stable `cellId`s rather than raw pixel coordinates, cross-cell arrows will automatically stay anchored even when zooming the grid or inserting/shifting rows and columns.
+- **Map-Level SVG Overlay (`MacroMapGrid.tsx`):**
+  - Render a single `<svg>` layer over the entire `rows × cols` grid container (above individual `GridCellCard`s so `overflow-hidden` does not clip lines crossing cell borders).
+  - Add a **"Draw Room Connection Arrow"** tool toggle in the `MacroMapGrid` toolbar (Click start spot in Cell A -> Click destination spot in Cell B).
+
+---
+
+## 4. Automated Unit & Integration Test Suite
 - Add **Vitest** + **`fake-indexeddb`** to test:
   - Coordinate math (`colIndexToLetter`, `letterToColIndex`, `formatCellCoord`, `parseCellCoord`).
   - Atomic 4-edge grid expansion/shrinking (`expandMapGrid` / `shrinkMapGrid` on `'top'`, `'left'`, `'bottom'`, `'right'`) and verifying that linked `CommentEntry.cellCoord` values update accurately when cells shift.
