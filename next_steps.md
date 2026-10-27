@@ -67,13 +67,8 @@ This roadmap organizes all planned enhancements, bug fixes, relational features,
 
 ---
 
-## Milestone E: One-Off Excel Workbook (`.xlsx`) to Tracker `.ZIP` Migration Script
-*Standalone script (`scripts/migrate-excel.ts` or `.py`) to convert your personal 20+ map Excel file into an importable `.zip` backup.*
-
-1. Parse all map worksheet tabs (`YgA Roots of Yggdrasil`, etc.), grid dimensions, and `'X'` blocked cells.
-2. Parse `xl/drawings/*.xml` cell anchors to extract every embedded `xl/media/imageN.png`, encode to 90% WebP + thumbnail, and link to the exact `(row, col)` `GridCell`.
-3. Parse the `Comments` sheet, syncing `Room Name` to cells, mapping `T:`/`NPC`/`Sk:`/`TODO:` categories, and creating a filterable Custom Dropdown Field (`"Race / Tribe"`) for the `Race/Tribe` column.
-4. Package into `migrated-excel-backup.zip` for one-click import via **Customize & Backup -> Import Backup (.ZIP)**.
+## Milestone E: One-Off Excel Workbook (`.xlsx`) to Tracker `.ZIP` Migration Script *(Deferred — See `migration-plan.md`)*
+*Tracked separately in [`migration-plan.md`](./migration-plan.md) so the migration pipeline and Excel XML/drawing nuances can be designed and tested as a dedicated feature.*
 
 ---
 

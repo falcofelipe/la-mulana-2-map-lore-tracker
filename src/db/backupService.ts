@@ -30,9 +30,10 @@ interface BackupJsonPayload {
 }
 
 /**
- * Exports the entire IndexedDB database (JSON tables + WebP images) into a downloadable `.zip` file.
+ * Builds and returns a compressed `.zip` Blob containing `project-data.json`
+ * and all `/images/` binary blobs from IndexedDB.
  */
-export async function exportFullBackupZip(): Promise<void> {
+export async function buildBackupZipBlob(): Promise<Blob> {
   const zip = new JSZip();
 
   const [config, maps, cells, comments, sketches, blobs] = await Promise.all([
@@ -65,11 +66,18 @@ export async function exportFullBackupZip(): Promise<void> {
     }
   }
 
-  const zipBlob = await zip.generateAsync({
+  return zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 },
   });
+}
+
+/**
+ * Exports the entire IndexedDB database (JSON tables + WebP images) into a downloadable `.zip` file.
+ */
+export async function exportFullBackupZip(): Promise<void> {
+  const zipBlob = await buildBackupZipBlob();
 
   const dateStamp = new Date().toISOString().slice(0, 10);
   const url = URL.createObjectURL(zipBlob);
@@ -86,7 +94,9 @@ export async function exportFullBackupZip(): Promise<void> {
  * Imports a previously exported `.zip` backup archive and restores all maps,
  * cells, comments, custom settings, and WebP screenshot blobs into IndexedDB.
  */
-export async function importFullBackupZip(file: File): Promise<string | null> {
+export async function importFullBackupZip(
+  file: Blob | ArrayBuffer | Uint8Array
+): Promise<string | null> {
   const zip = await JSZip.loadAsync(file);
   const dataFile = zip.file('project-data.json');
   if (!dataFile) {
