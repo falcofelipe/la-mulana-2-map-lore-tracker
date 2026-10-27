@@ -12,7 +12,6 @@ import React, { useState } from 'react';
 import {
   Download,
   Upload,
-  Sparkles,
   RotateCcw,
   MapPin,
   Users,
@@ -52,7 +51,6 @@ interface SettingsAndCustomizeViewProps {
   onSaveCustomCommentFields: (fields: CustomFieldDefinition[]) => Promise<void>;
   onExportZip: () => Promise<void>;
   onImportZip: (file: File) => Promise<void>;
-  onLoadSampleData: () => Promise<void>;
   onResetToBlank: () => Promise<void>;
 }
 
@@ -67,7 +65,6 @@ export const SettingsAndCustomizeView: React.FC<
   onSaveCustomCommentFields,
   onExportZip,
   onImportZip,
-  onLoadSampleData,
   onResetToBlank,
 }) => {
   // 1. Custom Marker creation state
@@ -297,23 +294,6 @@ export const SettingsAndCustomizeView: React.FC<
                 }}
               />
             </label>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    'Load the sample La-Mulana 2 dataset (YgA, DfA, sample rooms, pins, and comments)? This replaces current data.'
-                  )
-                ) {
-                  onLoadSampleData();
-                }
-              }}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30"
-            >
-              <Sparkles size={15} />
-              <span>Load Starter Sample Data (YgA / DfA)</span>
-            </button>
 
             <button
               type="button"

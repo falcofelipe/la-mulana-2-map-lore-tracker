@@ -20,12 +20,10 @@ import {
 import {
   createBlankInitialMap,
   createDefaultProjectConfig,
-  generateSampleDataset,
 } from '../config/defaultDefinitions';
 import { formatCellCoord } from '../utils/coordinates';
 import { db } from './database';
 import {
-  generateSampleRoomGraphic,
   processAndStoreAttachmentImage,
   processAndStoreRoomScreenshot,
 } from './imageProcessor';
@@ -786,65 +784,8 @@ export async function saveCustomCommentFields(
 }
 
 // ============================================================================
-// 7. SAMPLE DATA LOADER & DATABASE RESET
+// 7. DATABASE RESET
 // ============================================================================
-
-/**
- * Loads the sample La-Mulana 2 dataset (YgA, DfA, TsA, AcB + sample rooms,
- * generated 16:9 WebP room graphics, pins, arrows, and tablet/NPC comments).
- */
-export async function loadSampleDatasetWithGraphics(): Promise<string> {
-  const sample = generateSampleDataset();
-
-  // Generate crisp 16:9 sample room screenshots so the user can immediately test the UI
-  const verdandiImg = await generateSampleRoomGraphic(
-    "YgA $C$1 — Verdandi's Root",
-    'Roots of Yggdrasil • Grail Tablet & Upper Switch',
-    '#22c55e'
-  );
-  const gateImg = await generateSampleRoomGraphic(
-    'YgA $C$2 — Gate of Yggdrasil',
-    'Roots of Yggdrasil • Yuga Switch & Raijin / Fujin',
-    '#f59e0b'
-  );
-  const generationsImg = await generateSampleRoomGraphic(
-    'DfA $C$2 — Room of Generations',
-    'Divine Fortress • NPC Thor & Backside Warp to AcB',
-    '#06b6d4'
-  );
-
-  for (const cell of sample.cells) {
-    if (cell.mapId === 'map-yga' && cell.coord === '$C$1') {
-      cell.screenshotBlobId = verdandiImg.fullBlobId;
-      cell.thumbnailBlobId = verdandiImg.thumbBlobId;
-    } else if (cell.mapId === 'map-yga' && cell.coord === '$C$2') {
-      cell.screenshotBlobId = gateImg.fullBlobId;
-      cell.thumbnailBlobId = gateImg.thumbBlobId;
-    } else if (cell.mapId === 'map-dfa' && cell.coord === '$C$2') {
-      cell.screenshotBlobId = generationsImg.fullBlobId;
-      cell.thumbnailBlobId = generationsImg.thumbBlobId;
-    }
-  }
-
-  await db.transaction(
-    'rw',
-    [db.config, db.maps, db.cells, db.comments, db.sketches],
-    async () => {
-      await db.maps.clear();
-      await db.cells.clear();
-      await db.comments.clear();
-      await db.sketches.clear();
-
-      await db.config.put(sample.config);
-      await db.maps.bulkPut(sample.maps);
-      await db.cells.bulkPut(sample.cells);
-      await db.comments.bulkPut(sample.comments);
-      await db.sketches.bulkPut(sample.sketches);
-    }
-  );
-
-  return sample.maps[0].id;
-}
 
 /**
  * Resets the entire database back to a clean, spoiler-free blank playthrough.

@@ -14,7 +14,6 @@ import {
   Settings,
   Search,
   Download,
-  Sparkles,
   Compass,
 } from 'lucide-react';
 
@@ -26,11 +25,9 @@ interface TopNavbarProps {
   onSelectView: (view: ActiveAppView) => void;
   onOpenGlobalSearch: () => void;
   onQuickExportZip: () => void;
-  onLoadSampleData?: () => void;
   totalCommentsCount: number;
   unresolvedTodoCount: number;
   sketchesCount: number;
-  isBlankDatabase: boolean;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -39,11 +36,9 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onSelectView,
   onOpenGlobalSearch,
   onQuickExportZip,
-  onLoadSampleData,
   totalCommentsCount,
   unresolvedTodoCount,
   sketchesCount,
-  isBlankDatabase,
 }) => {
   return (
     <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-4 select-none shrink-0 z-30">
@@ -156,20 +151,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </button>
       </nav>
 
-      {/* Right Action Bar: Search (Ctrl+K), Sample Loader (if blank), Quick Export */}
+      {/* Right Action Bar: Search (Ctrl+K) & Quick Export */}
       <div className="flex items-center gap-2 shrink-0">
-        {isBlankDatabase && onLoadSampleData && (
-          <button
-            type="button"
-            onClick={onLoadSampleData}
-            title="Load sample maps (YgA, DfA) and comments to preview features"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 transition-colors"
-          >
-            <Sparkles size={14} />
-            <span className="hidden xl:inline">Load Sample Data</span>
-          </button>
-        )}
-
         <button
           type="button"
           onClick={onOpenGlobalSearch}

@@ -25,7 +25,6 @@ import {
   deleteSketchNote,
   deleteVectorArrowFromCell,
   expandMapGrid,
-  loadSampleDatasetWithGraphics,
   removeAttachmentFromComment,
   reorderMapPages,
   resetToBlankPlaythrough,
@@ -130,10 +129,7 @@ export const App: React.FC = () => {
       )
     : [];
 
-  // Check if the database is still completely blank (so we can show the optional "Load Sample Data" button)
   const activeRoomsCount = allCells.filter((c) => c.state !== 'empty').length;
-  const isBlankDatabase =
-    maps.length <= 1 && activeRoomsCount === 0 && allComments.length === 0;
 
   // 3. Global Keyboard Shortcuts (Ctrl+K, Ctrl+V Screenshot Paste, X Toggle Blocked, Enter Inspect, Esc Close)
   useEffect(() => {
@@ -238,15 +234,9 @@ export const App: React.FC = () => {
         onSelectView={setActiveView}
         onOpenGlobalSearch={() => setIsGlobalSearchOpen(true)}
         onQuickExportZip={exportFullBackupZip}
-        onLoadSampleData={async () => {
-          const firstMapId = await loadSampleDatasetWithGraphics();
-          setActiveMapId(firstMapId);
-          setActiveView('map');
-        }}
         totalCommentsCount={allComments.length}
         unresolvedTodoCount={unresolvedTodoCount}
         sketchesCount={allSketches.length}
-        isBlankDatabase={isBlankDatabase}
       />
 
       {/* VIEW 1: MAP GRID WORKSPACE (+ SPLIT OR MODAL ROOM INSPECTOR) */}
@@ -407,11 +397,6 @@ export const App: React.FC = () => {
           onImportZip={async (file) => {
             const firstMapId = await importFullBackupZip(file);
             if (firstMapId) setActiveMapId(firstMapId);
-            setActiveView('map');
-          }}
-          onLoadSampleData={async () => {
-            const firstMapId = await loadSampleDatasetWithGraphics();
-            setActiveMapId(firstMapId);
             setActiveView('map');
           }}
           onResetToBlank={async () => {
