@@ -11,8 +11,10 @@ import {
   CommentEntry,
   CustomFieldDefinition,
   GridCell,
+  MapGridArrow,
   MapPage,
   MarkerDefinition,
+  PassageDirection,
   PinMarker,
   SketchNote,
   VectorArrow,
@@ -176,41 +178,35 @@ async function syncShiftedTargetPinLabels(
 }
 
 /**
- * Expands a map's grid by adding 1 row or column on the specified edge:
- * - 'bottom' / 'right': Appends new empty cells without shifting existing coordinates.
- * - 'top' / 'left': Shifts existing cells by +1 row or +1 col, recalculates their
- *   `$Col$Row` string, and automatically updates linked CommentEntry `cellCoord` values!
+ * Inserts a new blank row at `insertRowIndex` (`0 <= insertRowIndex <= map.rows`),
+ * shifting all existing cells with `row >= insertRowIndex` down by +1 row,
+ * recalculating their `$Col$Row` coordinates, and syncing linked comments & warp pins.
  */
-export async function expandMapGrid(
+export async function insertRowAt(
   mapId: string,
-  direction: 'top' | 'bottom' | 'left' | 'right'
+  insertRowIndex: number
 ): Promise<void> {
   const now = Date.now();
   await db.transaction('rw', [db.maps, db.cells, db.comments], async () => {
     const map = await db.maps.get(mapId);
     if (!map) return;
 
+    const targetRow = Math.max(0, Math.min(map.rows, insertRowIndex));
     const existingCells = await db.cells.where('mapId').equals(mapId).toArray();
     const mapComments = await db.comments.where('mapId').equals(mapId).toArray();
 
-    const newRows = direction === 'top' || direction === 'bottom' ? map.rows + 1 : map.rows;
-    const newCols = direction === 'left' || direction === 'right' ? map.cols + 1 : map.cols;
-
+    const newRows = map.rows + 1;
     const updatedCells: GridCell[] = [];
-    const cellCoordMap = new Map<string, string>(); // cellId -> newCoord
+    const cellCoordMap = new Map<string, string>();
     const shiftedCoordPairs = new Map<
       string,
       { oldCoord: string; newCoord: string }
     >();
 
-    if (direction === 'top' || direction === 'left') {
-      const rowDelta = direction === 'top' ? 1 : 0;
-      const colDelta = direction === 'left' ? 1 : 0;
-
-      for (const cell of existingCells) {
-        const nextRow = cell.row + rowDelta;
-        const nextCol = cell.col + colDelta;
-        const nextCoord = formatCellCoord(nextRow, nextCol);
+    for (const cell of existingCells) {
+      if (cell.row >= targetRow) {
+        const nextRow = cell.row + 1;
+        const nextCoord = formatCellCoord(nextRow, cell.col);
         cellCoordMap.set(cell.id, nextCoord);
         shiftedCoordPairs.set(cell.id, {
           oldCoord: cell.coord,
@@ -219,50 +215,35 @@ export async function expandMapGrid(
         updatedCells.push({
           ...cell,
           row: nextRow,
-          col: nextCol,
           coord: nextCoord,
           updatedAt: now,
         });
       }
+    }
 
-      if (direction === 'top') {
-        for (let c = 0; c < newCols; c++) {
-          updatedCells.push({
-            id: `cell-${mapId}-0-${c}-${Math.random().toString(36).slice(2, 7)}`,
-            mapId,
-            row: 0,
-            col: c,
-            coord: formatCellCoord(0, c),
-            state: 'empty',
-            roomName: '',
-            tags: [],
-            markers: [],
-            arrows: [],
-            updatedAt: now,
-          });
-        }
-      } else {
-        for (let r = 0; r < newRows; r++) {
-          updatedCells.push({
-            id: `cell-${mapId}-${r}-0-${Math.random().toString(36).slice(2, 7)}`,
-            mapId,
-            row: r,
-            col: 0,
-            coord: formatCellCoord(r, 0),
-            state: 'empty',
-            roomName: '',
-            tags: [],
-            markers: [],
-            arrows: [],
-            updatedAt: now,
-          });
-        }
-      }
+    // Create the new blank row at `targetRow`
+    for (let c = 0; c < map.cols; c++) {
+      updatedCells.push({
+        id: `cell-${mapId}-${targetRow}-${c}-${Math.random()
+          .toString(36)
+          .slice(2, 7)}`,
+        mapId,
+        row: targetRow,
+        col: c,
+        coord: formatCellCoord(targetRow, c),
+        state: 'empty',
+        roomName: '',
+        tags: [],
+        markers: [],
+        arrows: [],
+        updatedAt: now,
+      });
+    }
 
-      await db.cells.bulkPut(updatedCells);
-      await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
+    await db.cells.bulkPut(updatedCells);
+    await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
 
-      // Update any comments linked to shifted cells
+    if (cellCoordMap.size > 0) {
       const updatedComments: CommentEntry[] = [];
       for (const comm of mapComments) {
         if (comm.cellId && cellCoordMap.has(comm.cellId)) {
@@ -276,129 +257,85 @@ export async function expandMapGrid(
       if (updatedComments.length > 0) {
         await db.comments.bulkPut(updatedComments);
       }
-    } else if (direction === 'bottom') {
-      const r = map.rows;
-      for (let c = 0; c < newCols; c++) {
-        updatedCells.push({
-          id: `cell-${mapId}-${r}-${c}-${Math.random().toString(36).slice(2, 7)}`,
-          mapId,
-          row: r,
-          col: c,
-          coord: formatCellCoord(r, c),
-          state: 'empty',
-          roomName: '',
-          tags: [],
-          markers: [],
-          arrows: [],
-          updatedAt: now,
-        });
-      }
-      await db.cells.bulkPut(updatedCells);
-    } else if (direction === 'right') {
-      const c = map.cols;
-      for (let r = 0; r < newRows; r++) {
-        updatedCells.push({
-          id: `cell-${mapId}-${r}-${c}-${Math.random().toString(36).slice(2, 7)}`,
-          mapId,
-          row: r,
-          col: c,
-          coord: formatCellCoord(r, c),
-          state: 'empty',
-          roomName: '',
-          tags: [],
-          markers: [],
-          arrows: [],
-          updatedAt: now,
-        });
-      }
-      await db.cells.bulkPut(updatedCells);
     }
 
-    await db.maps.update(mapId, { rows: newRows, cols: newCols });
+    await db.maps.update(mapId, { rows: newRows });
   });
 }
 
 /**
- * Removes the outer row or column on the specified edge (minimum 2x2 grid).
+ * Inserts a new blank column at `insertColIndex` (`0 <= insertColIndex <= map.cols`),
+ * shifting all existing cells with `col >= insertColIndex` right by +1 column,
+ * recalculating their `$Col$Row` coordinates, and syncing linked comments & warp pins.
  */
-export async function shrinkMapGrid(
+export async function insertColAt(
   mapId: string,
-  direction: 'top' | 'bottom' | 'left' | 'right'
+  insertColIndex: number
 ): Promise<void> {
   const now = Date.now();
-  await db.transaction('rw', [db.maps, db.cells, db.comments, db.blobs], async () => {
+  await db.transaction('rw', [db.maps, db.cells, db.comments], async () => {
     const map = await db.maps.get(mapId);
     if (!map) return;
-    if ((direction === 'top' || direction === 'bottom') && map.rows <= 2) return;
-    if ((direction === 'left' || direction === 'right') && map.cols <= 2) return;
 
+    const targetCol = Math.max(0, Math.min(map.cols, insertColIndex));
     const existingCells = await db.cells.where('mapId').equals(mapId).toArray();
     const mapComments = await db.comments.where('mapId').equals(mapId).toArray();
 
-    let cellsToRemove: GridCell[] = [];
-    let cellsToKeep: GridCell[] = [];
+    const newCols = map.cols + 1;
+    const updatedCells: GridCell[] = [];
+    const cellCoordMap = new Map<string, string>();
+    const shiftedCoordPairs = new Map<
+      string,
+      { oldCoord: string; newCoord: string }
+    >();
 
-    if (direction === 'bottom') {
-      cellsToRemove = existingCells.filter((c) => c.row === map.rows - 1);
-      cellsToKeep = existingCells.filter((c) => c.row < map.rows - 1);
-    } else if (direction === 'right') {
-      cellsToRemove = existingCells.filter((c) => c.col === map.cols - 1);
-      cellsToKeep = existingCells.filter((c) => c.col < map.cols - 1);
-    } else if (direction === 'top') {
-      cellsToRemove = existingCells.filter((c) => c.row === 0);
-      cellsToKeep = existingCells
-        .filter((c) => c.row > 0)
-        .map((c) => ({
-          ...c,
-          row: c.row - 1,
-          coord: formatCellCoord(c.row - 1, c.col),
+    for (const cell of existingCells) {
+      if (cell.col >= targetCol) {
+        const nextCol = cell.col + 1;
+        const nextCoord = formatCellCoord(cell.row, nextCol);
+        cellCoordMap.set(cell.id, nextCoord);
+        shiftedCoordPairs.set(cell.id, {
+          oldCoord: cell.coord,
+          newCoord: nextCoord,
+        });
+        updatedCells.push({
+          ...cell,
+          col: nextCol,
+          coord: nextCoord,
           updatedAt: now,
-        }));
-    } else if (direction === 'left') {
-      cellsToRemove = existingCells.filter((c) => c.col === 0);
-      cellsToKeep = existingCells
-        .filter((c) => c.col > 0)
-        .map((c) => ({
-          ...c,
-          col: c.col - 1,
-          coord: formatCellCoord(c.row, c.col - 1),
-          updatedAt: now,
-        }));
-    }
-
-    const removedIds = new Set(cellsToRemove.map((c) => c.id));
-    const blobIdsToDelete: string[] = [];
-    for (const c of cellsToRemove) {
-      if (c.screenshotBlobId) blobIdsToDelete.push(c.screenshotBlobId);
-      if (c.thumbnailBlobId) blobIdsToDelete.push(c.thumbnailBlobId);
-    }
-    if (blobIdsToDelete.length > 0) {
-      await db.blobs.bulkDelete(blobIdsToDelete);
-    }
-
-    await db.cells.bulkDelete(Array.from(removedIds));
-    if (direction === 'top' || direction === 'left') {
-      const oldCoordById = new Map(existingCells.map((c) => [c.id, c.coord]));
-      const shiftedCoordPairs = new Map<
-        string,
-        { oldCoord: string; newCoord: string }
-      >();
-      for (const kept of cellsToKeep) {
-        const oldCoord = oldCoordById.get(kept.id);
-        if (oldCoord && oldCoord !== kept.coord) {
-          shiftedCoordPairs.set(kept.id, { oldCoord, newCoord: kept.coord });
-        }
+        });
       }
+    }
 
-      await db.cells.bulkPut(cellsToKeep);
-      await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
-      const coordMap = new Map(cellsToKeep.map((c) => [c.id, c.coord]));
+    // Create the new blank column at `targetCol`
+    for (let r = 0; r < map.rows; r++) {
+      updatedCells.push({
+        id: `cell-${mapId}-${r}-${targetCol}-${Math.random()
+          .toString(36)
+          .slice(2, 7)}`,
+        mapId,
+        row: r,
+        col: targetCol,
+        coord: formatCellCoord(r, targetCol),
+        state: 'empty',
+        roomName: '',
+        tags: [],
+        markers: [],
+        arrows: [],
+        updatedAt: now,
+      });
+    }
+
+    await db.cells.bulkPut(updatedCells);
+    await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
+
+    if (cellCoordMap.size > 0) {
       const updatedComments: CommentEntry[] = [];
       for (const comm of mapComments) {
-        if (comm.cellId && coordMap.has(comm.cellId)) {
+        if (comm.cellId && cellCoordMap.has(comm.cellId)) {
           updatedComments.push({
             ...comm,
-            cellCoord: coordMap.get(comm.cellId)!,
+            cellCoord: cellCoordMap.get(comm.cellId)!,
             updatedAt: now,
           });
         }
@@ -408,11 +345,440 @@ export async function shrinkMapGrid(
       }
     }
 
-    await db.maps.update(mapId, {
-      rows: direction === 'top' || direction === 'bottom' ? map.rows - 1 : map.rows,
-      cols: direction === 'left' || direction === 'right' ? map.cols - 1 : map.cols,
-    });
+    await db.maps.update(mapId, { cols: newCols });
   });
+}
+
+/**
+ * Deletes the row at `deleteRowIndex` (minimum 2 rows remaining), cleaning up
+ * removed cell blobs/arrows and shifting any cells with `row > deleteRowIndex` up by -1.
+ */
+export async function deleteRowAt(
+  mapId: string,
+  deleteRowIndex: number
+): Promise<void> {
+  const now = Date.now();
+  await db.transaction(
+    'rw',
+    [db.maps, db.cells, db.comments, db.blobs],
+    async () => {
+      const map = await db.maps.get(mapId);
+      if (!map || map.rows <= 2) return;
+      if (deleteRowIndex < 0 || deleteRowIndex >= map.rows) return;
+
+      const existingCells = await db.cells.where('mapId').equals(mapId).toArray();
+      const mapComments = await db.comments.where('mapId').equals(mapId).toArray();
+
+      const cellsToRemove = existingCells.filter(
+        (c) => c.row === deleteRowIndex
+      );
+      const cellsToShift = existingCells.filter((c) => c.row > deleteRowIndex);
+
+      const removedIds = new Set(cellsToRemove.map((c) => c.id));
+      const blobIdsToDelete: string[] = [];
+      for (const c of cellsToRemove) {
+        if (c.screenshotBlobId) blobIdsToDelete.push(c.screenshotBlobId);
+        if (c.thumbnailBlobId) blobIdsToDelete.push(c.thumbnailBlobId);
+      }
+      if (blobIdsToDelete.length > 0) {
+        await db.blobs.bulkDelete(blobIdsToDelete);
+      }
+
+      await db.cells.bulkDelete(Array.from(removedIds));
+
+      if (cellsToShift.length > 0) {
+        const shiftedCoordPairs = new Map<
+          string,
+          { oldCoord: string; newCoord: string }
+        >();
+        const coordMap = new Map<string, string>();
+        const updatedCells = cellsToShift.map((c) => {
+          const nextRow = c.row - 1;
+          const nextCoord = formatCellCoord(nextRow, c.col);
+          shiftedCoordPairs.set(c.id, {
+            oldCoord: c.coord,
+            newCoord: nextCoord,
+          });
+          coordMap.set(c.id, nextCoord);
+          return {
+            ...c,
+            row: nextRow,
+            coord: nextCoord,
+            updatedAt: now,
+          };
+        });
+
+        await db.cells.bulkPut(updatedCells);
+        await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
+
+        const updatedComments: CommentEntry[] = [];
+        for (const comm of mapComments) {
+          if (comm.cellId && coordMap.has(comm.cellId)) {
+            updatedComments.push({
+              ...comm,
+              cellCoord: coordMap.get(comm.cellId)!,
+              updatedAt: now,
+            });
+          }
+        }
+        if (updatedComments.length > 0) {
+          await db.comments.bulkPut(updatedComments);
+        }
+      }
+
+      const nextGridArrows = (map.gridArrows || []).filter(
+        (a) => !removedIds.has(a.fromCellId) && !removedIds.has(a.toCellId)
+      );
+
+      await db.maps.update(mapId, {
+        rows: map.rows - 1,
+        gridArrows: nextGridArrows,
+      });
+    }
+  );
+}
+
+/**
+ * Deletes the column at `deleteColIndex` (minimum 2 columns remaining), cleaning up
+ * removed cell blobs/arrows and shifting any cells with `col > deleteColIndex` left by -1.
+ */
+export async function deleteColAt(
+  mapId: string,
+  deleteColIndex: number
+): Promise<void> {
+  const now = Date.now();
+  await db.transaction(
+    'rw',
+    [db.maps, db.cells, db.comments, db.blobs],
+    async () => {
+      const map = await db.maps.get(mapId);
+      if (!map || map.cols <= 2) return;
+      if (deleteColIndex < 0 || deleteColIndex >= map.cols) return;
+
+      const existingCells = await db.cells.where('mapId').equals(mapId).toArray();
+      const mapComments = await db.comments.where('mapId').equals(mapId).toArray();
+
+      const cellsToRemove = existingCells.filter(
+        (c) => c.col === deleteColIndex
+      );
+      const cellsToShift = existingCells.filter((c) => c.col > deleteColIndex);
+
+      const removedIds = new Set(cellsToRemove.map((c) => c.id));
+      const blobIdsToDelete: string[] = [];
+      for (const c of cellsToRemove) {
+        if (c.screenshotBlobId) blobIdsToDelete.push(c.screenshotBlobId);
+        if (c.thumbnailBlobId) blobIdsToDelete.push(c.thumbnailBlobId);
+      }
+      if (blobIdsToDelete.length > 0) {
+        await db.blobs.bulkDelete(blobIdsToDelete);
+      }
+
+      await db.cells.bulkDelete(Array.from(removedIds));
+
+      if (cellsToShift.length > 0) {
+        const shiftedCoordPairs = new Map<
+          string,
+          { oldCoord: string; newCoord: string }
+        >();
+        const coordMap = new Map<string, string>();
+        const updatedCells = cellsToShift.map((c) => {
+          const nextCol = c.col - 1;
+          const nextCoord = formatCellCoord(c.row, nextCol);
+          shiftedCoordPairs.set(c.id, {
+            oldCoord: c.coord,
+            newCoord: nextCoord,
+          });
+          coordMap.set(c.id, nextCoord);
+          return {
+            ...c,
+            col: nextCol,
+            coord: nextCoord,
+            updatedAt: now,
+          };
+        });
+
+        await db.cells.bulkPut(updatedCells);
+        await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
+
+        const updatedComments: CommentEntry[] = [];
+        for (const comm of mapComments) {
+          if (comm.cellId && coordMap.has(comm.cellId)) {
+            updatedComments.push({
+              ...comm,
+              cellCoord: coordMap.get(comm.cellId)!,
+              updatedAt: now,
+            });
+          }
+        }
+        if (updatedComments.length > 0) {
+          await db.comments.bulkPut(updatedComments);
+        }
+      }
+
+      const nextGridArrows = (map.gridArrows || []).filter(
+        (a) => !removedIds.has(a.fromCellId) && !removedIds.has(a.toCellId)
+      );
+
+      await db.maps.update(mapId, {
+        cols: map.cols - 1,
+        gridArrows: nextGridArrows,
+      });
+    }
+  );
+}
+
+/**
+ * Expands a map's grid by adding 1 row or column on the specified outer edge.
+ */
+export async function expandMapGrid(
+  mapId: string,
+  direction: 'top' | 'bottom' | 'left' | 'right'
+): Promise<void> {
+  const map = await db.maps.get(mapId);
+  if (!map) return;
+
+  if (direction === 'top') {
+    await insertRowAt(mapId, 0);
+  } else if (direction === 'bottom') {
+    await insertRowAt(mapId, map.rows);
+  } else if (direction === 'left') {
+    await insertColAt(mapId, 0);
+  } else if (direction === 'right') {
+    await insertColAt(mapId, map.cols);
+  }
+}
+
+/**
+ * Removes the outer row or column on the specified edge (minimum 2x2 grid).
+ */
+export async function shrinkMapGrid(
+  mapId: string,
+  direction: 'top' | 'bottom' | 'left' | 'right'
+): Promise<void> {
+  const map = await db.maps.get(mapId);
+  if (!map) return;
+
+  if (direction === 'top') {
+    await deleteRowAt(mapId, 0);
+  } else if (direction === 'bottom') {
+    await deleteRowAt(mapId, map.rows - 1);
+  } else if (direction === 'left') {
+    await deleteColAt(mapId, 0);
+  } else if (direction === 'right') {
+    await deleteColAt(mapId, map.cols - 1);
+  }
+}
+
+/**
+ * Moves or swaps two cells (`cellIdA` and `cellIdB`) on a map grid by exchanging
+ * their `(row, col, coord)` positions while keeping their UUIDs (`cell.id`) intact.
+ * Automatically updates `cellCoord` on all linked comments and warp pin labels!
+ */
+export async function swapOrMoveCells(
+  cellIdA: string,
+  cellIdB: string
+): Promise<void> {
+  if (cellIdA === cellIdB) return;
+  const now = Date.now();
+
+  await db.transaction('rw', [db.cells, db.comments], async () => {
+    const [cellA, cellB] = await Promise.all([
+      db.cells.get(cellIdA),
+      db.cells.get(cellIdB),
+    ]);
+    if (!cellA || !cellB || cellA.mapId !== cellB.mapId) return;
+
+    const updatedA: GridCell = {
+      ...cellA,
+      row: cellB.row,
+      col: cellB.col,
+      coord: cellB.coord,
+      updatedAt: now,
+    };
+
+    const updatedB: GridCell = {
+      ...cellB,
+      row: cellA.row,
+      col: cellA.col,
+      coord: cellA.coord,
+      updatedAt: now,
+    };
+
+    await db.cells.bulkPut([updatedA, updatedB]);
+
+    const shiftedCoordPairs = new Map<
+      string,
+      { oldCoord: string; newCoord: string }
+    >([
+      [cellA.id, { oldCoord: cellA.coord, newCoord: cellB.coord }],
+      [cellB.id, { oldCoord: cellB.coord, newCoord: cellA.coord }],
+    ]);
+
+    await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
+
+    // Sync any comments on this map linked to cellA or cellB
+    const mapComments = await db.comments
+      .where('mapId')
+      .equals(cellA.mapId)
+      .toArray();
+    const updatedComments: CommentEntry[] = [];
+
+    for (const comm of mapComments) {
+      if (comm.cellId === cellA.id || (!comm.cellId && comm.cellCoord === cellA.coord)) {
+        updatedComments.push({
+          ...comm,
+          cellId: cellA.id,
+          cellCoord: cellB.coord,
+          updatedAt: now,
+        });
+      } else if (
+        comm.cellId === cellB.id ||
+        (!comm.cellId && comm.cellCoord === cellB.coord)
+      ) {
+        updatedComments.push({
+          ...comm,
+          cellId: cellB.id,
+          cellCoord: cellA.coord,
+          updatedAt: now,
+        });
+      }
+    }
+
+    if (updatedComments.length > 0) {
+      await db.comments.bulkPut(updatedComments);
+    }
+  });
+}
+
+/**
+ * Toggles a cardinal doorway / passage indicator on `cellId` (`top`, `right`, `bottom`, `left`)
+ * and mirrors the opposite border on the adjacent neighbor cell if present.
+ */
+export async function toggleCellPassage(
+  cellId: string,
+  direction: PassageDirection
+): Promise<void> {
+  const now = Date.now();
+  await db.transaction('rw', db.cells, async () => {
+    const cell = await db.cells.get(cellId);
+    if (!cell) return;
+
+    const currentOpen = Boolean(cell.openPassages?.[direction]);
+    const nextOpen = !currentOpen;
+
+    await db.cells.update(cellId, {
+      openPassages: {
+        ...(cell.openPassages || {}),
+        [direction]: nextOpen,
+      },
+      updatedAt: now,
+    });
+
+    const neighborRow =
+      direction === 'top'
+        ? cell.row - 1
+        : direction === 'bottom'
+        ? cell.row + 1
+        : cell.row;
+    const neighborCol =
+      direction === 'left'
+        ? cell.col - 1
+        : direction === 'right'
+        ? cell.col + 1
+        : cell.col;
+
+    const oppositeDir: PassageDirection =
+      direction === 'top'
+        ? 'bottom'
+        : direction === 'bottom'
+        ? 'top'
+        : direction === 'left'
+        ? 'right'
+        : 'left';
+
+    const neighbor = await db.cells
+      .where('[mapId+row+col]')
+      .equals([cell.mapId, neighborRow, neighborCol])
+      .first();
+
+    if (neighbor) {
+      await db.cells.update(neighbor.id, {
+        openPassages: {
+          ...(neighbor.openPassages || {}),
+          [oppositeDir]: nextOpen,
+        },
+        updatedAt: now,
+      });
+    }
+  });
+}
+
+/**
+ * Adds a cross-cell arrow to the active map's Macro Map Grid overlay.
+ */
+export async function addMapGridArrow(
+  mapId: string,
+  arrow: Omit<MapGridArrow, 'id'>
+): Promise<MapGridArrow> {
+  const map = await db.maps.get(mapId);
+  if (!map) throw new Error('Map not found');
+
+  const newArrow: MapGridArrow = {
+    ...arrow,
+    id: `marr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  };
+
+  await db.maps.update(mapId, {
+    gridArrows: [...(map.gridArrows || []), newArrow],
+  });
+
+  return newArrow;
+}
+
+export async function updateMapGridArrow(
+  mapId: string,
+  arrowId: string,
+  updates: Partial<MapGridArrow>
+): Promise<void> {
+  const map = await db.maps.get(mapId);
+  if (!map) return;
+
+  await db.maps.update(mapId, {
+    gridArrows: (map.gridArrows || []).map((a) =>
+      a.id === arrowId ? { ...a, ...updates } : a
+    ),
+  });
+}
+
+export async function deleteMapGridArrow(
+  mapId: string,
+  arrowId: string
+): Promise<void> {
+  const map = await db.maps.get(mapId);
+  if (!map) return;
+
+  await db.maps.update(mapId, {
+    gridArrows: (map.gridArrows || []).filter((a) => a.id !== arrowId),
+  });
+}
+
+/**
+ * Toggles a manual map-level outgoing connection (`manualOutgoingMapIds`) on `mapId`.
+ */
+export async function toggleManualMapConnection(
+  mapId: string,
+  targetMapId: string
+): Promise<void> {
+  if (!mapId || !targetMapId || mapId === targetMapId) return;
+  const map = await db.maps.get(mapId);
+  if (!map) return;
+
+  const existing = map.manualOutgoingMapIds || [];
+  const next = existing.includes(targetMapId)
+    ? existing.filter((id) => id !== targetMapId)
+    : [...existing, targetMapId];
+
+  await db.maps.update(mapId, { manualOutgoingMapIds: next });
 }
 
 // ============================================================================

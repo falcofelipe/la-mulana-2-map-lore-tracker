@@ -11,6 +11,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, ensureDatabaseInitialized } from './db/database';
 import {
   addCustomFieldOption,
+  addMapGridArrow,
   addPinMarkerToCell,
   addRoomFlagOption,
   addVectorArrowToCell,
@@ -20,19 +21,27 @@ import {
   createCommentEntry,
   createMapPage,
   createSketchNote,
+  deleteColAt,
   deleteCommentEntry,
+  deleteMapGridArrow,
   deleteMapPage,
   deletePinMarkerFromCell,
+  deleteRowAt,
   deleteSketchNote,
   deleteVectorArrowFromCell,
   expandMapGrid,
+  insertColAt,
+  insertRowAt,
   removeAttachmentFromComment,
   reorderMapPages,
   resetToBlankPlaythrough,
   saveCustomCommentFields,
   saveMarkerDefinitions,
   shrinkMapGrid,
+  swapOrMoveCells,
   toggleCellBlockedState,
+  toggleCellPassage,
+  toggleManualMapConnection,
   updateCellMetadata,
   updateCommentEntry,
   updateCustomFieldOptions,
@@ -122,6 +131,7 @@ export const App: React.FC = () => {
   const activeMap = maps.find((m) => m.id === activeMapId) || maps[0] || null;
   const activeMapCells = allCells.filter((c) => c.mapId === activeMap?.id);
   const activeMapComments = allComments.filter((c) => c.mapId === activeMap?.id);
+  const activeMapSketches = allSketches.filter((s) => s.mapId === activeMap?.id);
 
   const inspectedCell =
     allCells.find((c) => c.id === inspectedCellId) || null;
@@ -279,8 +289,11 @@ export const App: React.FC = () => {
           <div className="flex-1 flex min-h-0 overflow-hidden">
             <MacroMapGrid
               map={activeMap}
+              maps={maps}
               cells={activeMapCells}
+              allCells={allCells}
               comments={activeMapComments}
+              mapSketches={activeMapSketches}
               markerDefinitions={config.markerDefinitions}
               selectedCellId={selectedCellId}
               inspectedCellId={inspectedCellId}
@@ -291,6 +304,12 @@ export const App: React.FC = () => {
                   [key]: !prev[key],
                 }))
               }
+              onSelectMap={(id) => {
+                setActiveMapId(id);
+                setSelectedCellId(null);
+                setInspectedCellId(null);
+              }}
+              onJumpToRoom={handleJumpToRoom}
               onSelectCell={(cellId) => setSelectedCellId(cellId)}
               onInspectCell={(cellId) => {
                 setSelectedCellId(cellId);
@@ -302,6 +321,24 @@ export const App: React.FC = () => {
               onClearScreenshot={clearCellScreenshot}
               onExpandGrid={(dir) => expandMapGrid(activeMap.id, dir)}
               onShrinkGrid={(dir) => shrinkMapGrid(activeMap.id, dir)}
+              onInsertRowAt={(rowIdx) => insertRowAt(activeMap.id, rowIdx)}
+              onInsertColAt={(colIdx) => insertColAt(activeMap.id, colIdx)}
+              onDeleteRowAt={(rowIdx) => deleteRowAt(activeMap.id, rowIdx)}
+              onDeleteColAt={(colIdx) => deleteColAt(activeMap.id, colIdx)}
+              onSwapOrMoveCells={swapOrMoveCells}
+              onToggleCellPassage={toggleCellPassage}
+              onAddMapGridArrow={(arrow) =>
+                addMapGridArrow(activeMap.id, arrow)
+              }
+              onDeleteMapGridArrow={(arrowId) =>
+                deleteMapGridArrow(activeMap.id, arrowId)
+              }
+              onToggleManualMapConnection={(targetMapId) =>
+                toggleManualMapConnection(activeMap.id, targetMapId)
+              }
+              onCreateSketch={createSketchNote}
+              onUpdateSketch={updateSketchNote}
+              onDeleteSketch={deleteSketchNote}
             />
 
             {/* Dual-Mode Room Detail Inspector (Split Drawer or Full Modal) */}

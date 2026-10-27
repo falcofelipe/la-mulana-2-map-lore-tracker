@@ -261,7 +261,37 @@ export const GridCellCard: React.FC<GridCellCardProps> = ({
         </button>
       </div>
 
-      {/* 7. BOTTOM ROOM NAME BANNER */}
+      {/* 7. ADJACENT DOORWAY / PASSAGE BORDER INDICATORS */}
+      {cell.state !== 'blocked_x' && cell.openPassages && (
+        <>
+          {cell.openPassages.top && (
+            <div
+              title="Open Top Passage"
+              className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-b bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] pointer-events-none z-20"
+            />
+          )}
+          {cell.openPassages.bottom && (
+            <div
+              title="Open Bottom Passage"
+              className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-1.5 rounded-t bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] pointer-events-none z-20"
+            />
+          )}
+          {cell.openPassages.left && (
+            <div
+              title="Open Left Passage"
+              className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1.5 rounded-r bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] pointer-events-none z-20"
+            />
+          )}
+          {cell.openPassages.right && (
+            <div
+              title="Open Right Passage"
+              className="absolute right-0 top-1/2 -translate-y-1/2 h-7 w-1.5 rounded-l bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] pointer-events-none z-20"
+            />
+          )}
+        </>
+      )}
+
+      {/* 8. BOTTOM ROOM NAME BANNER */}
       {layerVisibility.showRoomNames && cell.roomName && cell.state !== 'blocked_x' && (
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-slate-950/95 via-slate-950/80 to-transparent px-2 py-1 pointer-events-none z-20">
           <p className="text-[11px] font-semibold text-slate-100 truncate drop-shadow">

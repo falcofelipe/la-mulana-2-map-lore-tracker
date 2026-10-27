@@ -115,6 +115,27 @@ export interface VectorArrow {
 }
 
 /**
+ * Cardinal doorway / passage directions on a GridCell border.
+ */
+export type PassageDirection = 'top' | 'right' | 'bottom' | 'left';
+
+export type CellPassages = Partial<Record<PassageDirection, boolean>>;
+
+/**
+ * Cross-cell vector arrow rendered on the Macro Map Grid between two cells
+ * (e.g., long vertical drops, multi-room shafts, or hidden tunnels).
+ */
+export interface MapGridArrow {
+  id: string;
+  fromCellId: string;
+  toCellId: string;
+  color: string;
+  bidirectional: boolean;
+  dashed: boolean;
+  label?: string;
+}
+
+/**
  * Represents a single coordinate cell (e.g. $C$2) on a MapPage grid.
  */
 export interface GridCell {
@@ -127,6 +148,7 @@ export interface GridCell {
   roomName: string;         // e.g. "Room of Generations"
   isCompleted?: boolean;    // Optional visual completion status
   tags: string[];           // Room flags (e.g., "Save Point", "Grail Tablet", "Ankh Jewel")
+  openPassages?: CellPassages; // Optional 1-click doorway toggles on cell borders
   screenshotBlobId?: string;// High-resolution 90% WebP image in IndexedDB
   thumbnailBlobId?: string; // Lightweight WebP thumbnail for fast macro-grid rendering
   markers: PinMarker[];
@@ -144,6 +166,8 @@ export interface MapPage {
   rows: number;             // Number of grid rows (default 7)
   cols: number;             // Number of grid columns (default 8)
   order: number;            // Tab display order
+  gridArrows?: MapGridArrow[]; // Cross-cell arrows drawn on the Macro Map Grid
+  manualOutgoingMapIds?: string[]; // Optional manual map-level connections
   createdAt: number;
 }
 
