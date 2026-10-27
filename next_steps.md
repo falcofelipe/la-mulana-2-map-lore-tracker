@@ -30,7 +30,21 @@ An Excel `.xlsx` file is actually a standard ZIP archive containing:
 
 ---
 
-## 2. Automated Unit & Integration Test Suite
+## 2. Insert / Delete Row or Column in the Middle of a Grid (& Move/Swap Rooms)
+**Goal:** Allow inserting or deleting a row/column between existing rooms (e.g., inserting a new column between `Col A` and `Col B` if a room or vertical shaft was missed), or dragging/moving a room cell to another coordinate.
+
+### Implementation Details
+- **Generalize `expandMapGrid` / `shrinkMapGrid` in `src/db/repository.ts`:**
+  - Add `insertRowAt(mapId, targetRowIndex)` and `insertColAt(mapId, targetColIndex)`.
+  - Shift all existing cells on `mapId` where `cell.row >= targetRowIndex` (or `cell.col >= targetColIndex`) by `+1`, recalculate their `coord` (`$Col$Row`), and atomically update `CommentEntry.cellCoord` via `cellId`.
+- **UI Controls on Column/Row Headers (`MacroMapGrid.tsx`):**
+  - Hovering a column header (`A`, `B`, `C...`) or row header (`1`, `2`, `3...`) reveals tiny `+Before / +After / Trash` actions (or a right-click context menu) just like Excel.
+- **Swap / Move Room Cell:**
+  - Allow moving or swapping two cells' contents (screenshot, room name, pins, arrows, and linked comments) if a room was accidentally pasted into the wrong coordinate.
+
+---
+
+## 3. Automated Unit & Integration Test Suite
 - Add **Vitest** + **`fake-indexeddb`** to test:
   - Coordinate math (`colIndexToLetter`, `letterToColIndex`, `formatCellCoord`, `parseCellCoord`).
   - Atomic 4-edge grid expansion/shrinking (`expandMapGrid` / `shrinkMapGrid` on `'top'`, `'left'`, `'bottom'`, `'right'`) and verifying that linked `CommentEntry.cellCoord` values update accurately when cells shift.
