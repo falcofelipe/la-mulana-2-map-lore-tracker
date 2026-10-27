@@ -7,7 +7,7 @@
  * jump to any room on the Map Grid.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Filter,
@@ -28,8 +28,51 @@ import {
 } from '../../types/models';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { BlobImagePreview } from '../common/BlobImagePreview';
+import { CustomSelectDropdown } from './CustomSelectDropdown';
 import { RaceTribeSelector } from './RaceTribeSelector';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
+
+/**
+ * Local-buffered text input for inline table cell editing.
+ * Maintains local draft state while typing and commits to IndexedDB on blur
+ * or Enter key, preventing async DB writes on every keystroke.
+ */
+const BufferedCustomTextInput: React.FC<{
+  value: string;
+  placeholder?: string;
+  onCommit: (nextValue: string) => void;
+}> = ({ value, placeholder = '—', onCommit }) => {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const commitIfChanged = () => {
+    if (draft !== value) {
+      onCommit(draft);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commitIfChanged}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setDraft(value);
+          e.currentTarget.blur();
+        }
+      }}
+      placeholder={placeholder}
+      className="w-full bg-slate-950/80 border border-slate-800 focus:border-amber-400 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none"
+    />
+  );
+};
 
 interface CommentsTableViewProps {
   maps: MapPage[];
@@ -50,6 +93,7 @@ interface CommentsTableViewProps {
   onAttachImageToComment: (commentId: string, blob: Blob) => Promise<string>;
   onRemoveAttachmentFromComment: (commentId: string, blobId: string) => Promise<void>;
   onAddNewRaceOrTribe: (name: string) => Promise<void>;
+  onAddCustomFieldOption: (fieldId: string, newOption: string) => Promise<void>;
 }
 
 export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
@@ -66,6 +110,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   onAttachImageToComment,
   onRemoveAttachmentFromComment,
   onAddNewRaceOrTribe,
+  onAddCustomFieldOption,
 }) => {
   // Multi-column Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -392,6 +437,47 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
             </div>
           </div>
 
+          {customCommentFields.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs pt-1 border-t border-slate-800/80">
+              {customCommentFields.map((field) => (
+                <div key={field.id}>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    {field.name}
+                  </label>
+                  {field.type === 'select' ? (
+                    <CustomSelectDropdown
+                      value={addCustomFields[field.id] || ''}
+                      options={field.options || []}
+                      placeholder={`— Select ${field.name} —`}
+                      onChange={(val) =>
+                        setAddCustomFields((prev) => ({
+                          ...prev,
+                          [field.id]: val,
+                        }))
+                      }
+                      onAddNewOption={(newOpt) =>
+                        onAddCustomFieldOption(field.id, newOpt)
+                      }
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={addCustomFields[field.id] || ''}
+                      onChange={(e) =>
+                        setAddCustomFields((prev) => ({
+                          ...prev,
+                          [field.id]: e.target.value,
+                        }))
+                      }
+                      placeholder={`Enter ${field.name}...`}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-slate-100"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5">
             <textarea
               rows={2}
@@ -559,20 +645,38 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                     {/* Custom User-Defined Columns */}
                     {visibleCustomColumns.map((col) => (
                       <td key={col.id} className="py-3 px-3.5 align-top">
-                        <input
-                          type="text"
-                          value={comm.customFields?.[col.id] || ''}
-                          onChange={(e) =>
-                            onUpdateComment(comm.id, {
-                              customFields: {
-                                ...(comm.customFields || {}),
-                                [col.id]: e.target.value,
-                              },
-                            })
-                          }
-                          placeholder="—"
-                          className="w-full bg-slate-950/80 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-200"
-                        />
+                        {col.type === 'select' ? (
+                          <CustomSelectDropdown
+                            value={comm.customFields?.[col.id] || ''}
+                            options={col.options || []}
+                            placeholder="—"
+                            compact
+                            onChange={(nextVal) =>
+                              onUpdateComment(comm.id, {
+                                customFields: {
+                                  ...(comm.customFields || {}),
+                                  [col.id]: nextVal,
+                                },
+                              })
+                            }
+                            onAddNewOption={(newOpt) =>
+                              onAddCustomFieldOption(col.id, newOpt)
+                            }
+                          />
+                        ) : (
+                          <BufferedCustomTextInput
+                            value={comm.customFields?.[col.id] || ''}
+                            placeholder="—"
+                            onCommit={(nextVal) =>
+                              onUpdateComment(comm.id, {
+                                customFields: {
+                                  ...(comm.customFields || {}),
+                                  [col.id]: nextVal,
+                                },
+                              })
+                            }
+                          />
+                        )}
                       </td>
                     ))}
 

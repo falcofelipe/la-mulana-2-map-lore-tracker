@@ -390,96 +390,142 @@ export const SettingsAndCustomizeView: React.FC<
           {/* Add New Marker Category Form */}
           <form
             onSubmit={handleAddMarkerDef}
-            className="bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-wrap items-end gap-3 text-xs"
+            className="bg-slate-950/80 border border-slate-800 rounded-lg p-4 flex flex-col gap-3.5 text-xs"
           >
-            <div className="flex-1 min-w-[160px]">
-              <label className="block text-[11px] text-slate-400 mb-1">
-                New Marker Name
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">
+                  New Marker Name
+                </label>
+                <input
+                  type="text"
+                  value={newMarkerName}
+                  onChange={(e) => setNewMarkerName(e.target.value)}
+                  placeholder="e.g., Grail Point / Fairy / Dissonance"
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={newMarkerDesc}
+                  onChange={(e) => setNewMarkerDesc(e.target.value)}
+                  placeholder="Short description..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-end gap-3">
+                <div className="w-24">
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    Badge Char
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={2}
+                    value={newMarkerSymbol}
+                    onChange={(e) => setNewMarkerSymbol(e.target.value)}
+                    placeholder="Opt (!)"
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-center text-slate-100 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    Color
+                  </label>
+                  <input
+                    type="color"
+                    value={newMarkerColor}
+                    onChange={(e) => setNewMarkerColor(e.target.value)}
+                    className="w-10 h-8 rounded bg-slate-900 border border-slate-700 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-1.5 py-2 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newMarkerShowOnMacro}
+                  onChange={(e) => setNewMarkerShowOnMacro(e.target.checked)}
+                  className="accent-amber-400"
+                />
+                <span>Show Label on Macro Grid</span>
               </label>
-              <input
-                type="text"
-                value={newMarkerName}
-                onChange={(e) => setNewMarkerName(e.target.value)}
-                placeholder="e.g., Grail Point / Fairy / Dissonance"
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
-              />
             </div>
 
-            <div className="flex-1 min-w-[180px]">
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Description
-              </label>
-              <input
-                type="text"
-                value={newMarkerDesc}
-                onChange={(e) => setNewMarkerDesc(e.target.value)}
-                placeholder="Short description..."
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
-              />
+            {/* Visual Clickable Icon Picker + Live Pin Preview */}
+            <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-800/80">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] text-slate-400">
+                  Choose Marker Icon{' '}
+                  <span className="text-slate-500">
+                    (used when Badge Char is blank)
+                  </span>
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {AVAILABLE_MARKER_ICONS.map((ic) => {
+                    const isSelected = newMarkerIcon === ic.key;
+                    return (
+                      <button
+                        key={ic.key}
+                        type="button"
+                        onClick={() => setNewMarkerIcon(ic.key)}
+                        title={ic.label}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] transition-all ${
+                          isSelected
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-300 font-semibold shadow-sm'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                        }`}
+                      >
+                        <MarkerIcon iconKey={ic.key} size={14} />
+                        <span>{ic.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Live Visual Pin Preview + Submit Button */}
+              <div className="flex items-center gap-3 ml-auto">
+                <div className="flex items-center gap-2.5 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                    Live Preview:
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      style={{ backgroundColor: newMarkerColor }}
+                      className="w-7 h-7 rounded-full border-2 border-slate-950 flex items-center justify-center text-slate-950 font-bold text-xs shadow-md"
+                    >
+                      {newMarkerSymbol.trim() ? (
+                        <span>{newMarkerSymbol.trim()}</span>
+                      ) : (
+                        <MarkerIcon
+                          iconKey={newMarkerIcon}
+                          size={15}
+                          className="text-slate-950 stroke-[2.5]"
+                        />
+                      )}
+                    </div>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-950 text-slate-100 border border-slate-700 text-xs font-bold whitespace-nowrap">
+                      {newMarkerName.trim() || 'Sample Label'}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold shadow"
+                >
+                  <Plus size={14} />
+                  <span>Add Marker Type</span>
+                </button>
+              </div>
             </div>
-
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Icon
-              </label>
-              <select
-                value={newMarkerIcon}
-                onChange={(e) =>
-                  setNewMarkerIcon(e.target.value as MarkerIconKey)
-                }
-                className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
-              >
-                {AVAILABLE_MARKER_ICONS.map((ic) => (
-                  <option key={ic.key} value={ic.key}>
-                    {ic.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="w-20">
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Badge Char
-              </label>
-              <input
-                type="text"
-                maxLength={2}
-                value={newMarkerSymbol}
-                onChange={(e) => setNewMarkerSymbol(e.target.value)}
-                placeholder="Opt (!)"
-                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-center text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Color
-              </label>
-              <input
-                type="color"
-                value={newMarkerColor}
-                onChange={(e) => setNewMarkerColor(e.target.value)}
-                className="w-9 h-8 rounded bg-slate-900 border border-slate-700 cursor-pointer"
-              />
-            </div>
-
-            <label className="flex items-center gap-1.5 py-2 text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={newMarkerShowOnMacro}
-                onChange={(e) => setNewMarkerShowOnMacro(e.target.checked)}
-                className="accent-amber-400"
-              />
-              <span>Show Label on Macro Grid</span>
-            </label>
-
-            <button
-              type="submit"
-              className="flex items-center gap-1 px-3.5 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold"
-            >
-              <Plus size={14} />
-              <span>Add Marker Type</span>
-            </button>
           </form>
         </div>
 

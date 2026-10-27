@@ -6,7 +6,7 @@
  * the 2-click / multi-point SVG Vector Arrow tool.
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   MousePointer,
   MapPin,
@@ -105,6 +105,47 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
 
   const selectedPin = cell.markers.find((m) => m.id === selectedPinId) || null;
   const selectedArrow = cell.arrows.find((a) => a.id === selectedArrowId) || null;
+
+  // Listen for the `Delete` key when a Pin or Vector Arrow is selected
+  useEffect(() => {
+    if (!selectedPin && !selectedArrow) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete') return;
+
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      if (isTyping) return;
+
+      e.preventDefault();
+      if (selectedPin) {
+        const label = selectedPin.shortLabel
+          ? ` ("${selectedPin.shortLabel}")`
+          : '';
+        if (window.confirm(`Delete this pin marker${label}?`)) {
+          onDeletePin(selectedPin.id);
+          setSelectedPinId(null);
+        }
+      } else if (selectedArrow) {
+        const label = selectedArrow.label ? ` ("${selectedArrow.label}")` : '';
+        if (window.confirm(`Delete this movement arrow${label}?`)) {
+          onDeleteArrow(selectedArrow.id);
+          setSelectedArrowId(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedPin, selectedArrow, onDeletePin, onDeleteArrow]);
 
   const getRelativePercentCoords = (
     clientX: number,
@@ -543,6 +584,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                   setSelectedPinId(null);
                 }}
                 className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30"
+                title="Delete Pin (Shortcut: Delete key)"
               >
                 <Trash2 size={13} />
                 <span>Delete Pin</span>
@@ -739,6 +781,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                 setSelectedArrowId(null);
               }}
               className="flex items-center gap-1 px-2.5 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30"
+              title="Delete Arrow (Shortcut: Delete key)"
             >
               <Trash2 size={13} />
               <span>Delete Arrow</span>

@@ -34,6 +34,7 @@ import {
 import { ROOM_TAG_SUGGESTIONS } from '../../config/defaultDefinitions';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { AnnotatedRoomCanvas } from './AnnotatedRoomCanvas';
+import { CustomSelectDropdown } from '../comments/CustomSelectDropdown';
 import { RaceTribeSelector } from '../comments/RaceTribeSelector';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
@@ -70,6 +71,7 @@ interface RoomDetailDrawerProps {
   onAttachImageToComment: (commentId: string, blob: Blob) => Promise<string>;
   onRemoveAttachmentFromComment: (commentId: string, blobId: string) => Promise<void>;
   onAddNewRaceOrTribe: (name: string) => Promise<void>;
+  onAddCustomFieldOption: (fieldId: string, newOption: string) => Promise<void>;
 }
 
 export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
@@ -97,6 +99,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   onAttachImageToComment,
   onRemoveAttachmentFromComment,
   onAddNewRaceOrTribe,
+  onAddCustomFieldOption,
 }) => {
   // Quick-Add Comment Form State
   const [newCategory, setNewCategory] = useState<string>(
@@ -264,6 +267,10 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
             onUploadScreenshot={onUploadScreenshot}
             onJumpToComment={(commentId) => {
               setHighlightedCommentId(commentId);
+              const el = document.getElementById(`comment-card-${commentId}`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
               setTimeout(() => setHighlightedCommentId(null), 2500);
             }}
           />
@@ -331,6 +338,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                     return (
                       <div
                         key={comm.id}
+                        id={`comment-card-${comm.id}`}
                         className="bg-slate-950 border border-amber-500/60 rounded-lg p-3 flex flex-col gap-2 text-xs"
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -373,23 +381,20 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                                   {field.name}
                                 </label>
                                 {field.type === 'select' ? (
-                                  <select
+                                  <CustomSelectDropdown
                                     value={editCustomFields[field.id] || ''}
-                                    onChange={(e) =>
+                                    options={field.options || []}
+                                    placeholder="—"
+                                    onChange={(val) =>
                                       setEditCustomFields((prev) => ({
                                         ...prev,
-                                        [field.id]: e.target.value,
+                                        [field.id]: val,
                                       }))
                                     }
-                                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100"
-                                  >
-                                    <option value="">—</option>
-                                    {(field.options || []).map((opt) => (
-                                      <option key={opt} value={opt}>
-                                        {opt}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    onAddNewOption={(newOpt) =>
+                                      onAddCustomFieldOption(field.id, newOpt)
+                                    }
+                                  />
                                 ) : (
                                   <input
                                     type="text"
@@ -431,6 +436,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                   return (
                     <div
                       key={comm.id}
+                      id={`comment-card-${comm.id}`}
                       className={`bg-slate-950/90 border rounded-lg p-3 flex flex-col gap-2 transition-all ${
                         isHighlighted
                           ? 'border-amber-400 ring-2 ring-amber-400/40'
@@ -660,23 +666,20 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                       {field.name}
                     </label>
                     {field.type === 'select' ? (
-                      <select
+                      <CustomSelectDropdown
                         value={newCustomFields[field.id] || ''}
-                        onChange={(e) =>
+                        options={field.options || []}
+                        placeholder={`— Select ${field.name} —`}
+                        onChange={(val) =>
                           setNewCustomFields((prev) => ({
                             ...prev,
-                            [field.id]: e.target.value,
+                            [field.id]: val,
                           }))
                         }
-                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100"
-                      >
-                        <option value="">— Select {field.name} —</option>
-                        {(field.options || []).map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
+                        onAddNewOption={(newOpt) =>
+                          onAddCustomFieldOption(field.id, newOpt)
+                        }
+                      />
                     ) : (
                       <input
                         type="text"

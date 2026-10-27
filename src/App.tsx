@@ -10,6 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, ensureDatabaseInitialized } from './db/database';
 import {
+  addCustomFieldOption,
   addPinMarkerToCell,
   addRaceOrTribeOption,
   addVectorArrowToCell,
@@ -337,6 +338,7 @@ export const App: React.FC = () => {
                 onAttachImageToComment={attachImageToComment}
                 onRemoveAttachmentFromComment={removeAttachmentFromComment}
                 onAddNewRaceOrTribe={addRaceOrTribeOption}
+                onAddCustomFieldOption={addCustomFieldOption}
               />
             )}
           </div>
@@ -359,6 +361,7 @@ export const App: React.FC = () => {
           onAttachImageToComment={attachImageToComment}
           onRemoveAttachmentFromComment={removeAttachmentFromComment}
           onAddNewRaceOrTribe={addRaceOrTribeOption}
+          onAddCustomFieldOption={addCustomFieldOption}
         />
       )}
 

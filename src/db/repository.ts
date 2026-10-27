@@ -783,6 +783,35 @@ export async function saveCustomCommentFields(
   });
 }
 
+export async function addCustomFieldOption(
+  fieldId: string,
+  optionValue: string
+): Promise<void> {
+  const clean = optionValue.trim();
+  if (!clean) return;
+
+  const config = await db.config.get('singleton');
+  if (!config) return;
+
+  const updatedFields = config.customCommentFields.map((field) => {
+    if (field.id !== fieldId) return field;
+    const existingOptions = field.options || [];
+    const alreadyExists = existingOptions.some(
+      (opt) => opt.toLowerCase() === clean.toLowerCase()
+    );
+    if (alreadyExists) return field;
+    return {
+      ...field,
+      options: [...existingOptions, clean],
+    };
+  });
+
+  await db.config.update('singleton', {
+    customCommentFields: updatedFields,
+    updatedAt: Date.now(),
+  });
+}
+
 // ============================================================================
 // 7. DATABASE RESET
 // ============================================================================
