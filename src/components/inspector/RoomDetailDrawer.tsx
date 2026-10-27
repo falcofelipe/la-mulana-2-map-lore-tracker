@@ -31,11 +31,9 @@ import {
   PinMarker,
   VectorArrow,
 } from '../../types/models';
-import { ROOM_TAG_SUGGESTIONS } from '../../config/defaultDefinitions';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { AnnotatedRoomCanvas } from './AnnotatedRoomCanvas';
 import { CustomSelectDropdown } from '../comments/CustomSelectDropdown';
-import { RaceTribeSelector } from '../comments/RaceTribeSelector';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
@@ -45,7 +43,7 @@ interface RoomDetailDrawerProps {
   roomComments: CommentEntry[];
   markerDefinitions: MarkerDefinition[];
   commentCategories: CommentCategoryDefinition[];
-  raceOrTribeOptions: string[];
+  roomFlagOptions: string[];
   customCommentFields: CustomFieldDefinition[];
   isFullModal: boolean;
   onToggleFullModal: () => void;
@@ -70,7 +68,7 @@ interface RoomDetailDrawerProps {
   onDeleteComment: (commentId: string) => Promise<void>;
   onAttachImageToComment: (commentId: string, blob: Blob) => Promise<string>;
   onRemoveAttachmentFromComment: (commentId: string, blobId: string) => Promise<void>;
-  onAddNewRaceOrTribe: (name: string) => Promise<void>;
+  onAddRoomFlagOption: (flagName: string) => Promise<void>;
   onAddCustomFieldOption: (fieldId: string, newOption: string) => Promise<void>;
 }
 
@@ -80,7 +78,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   roomComments,
   markerDefinitions,
   commentCategories,
-  raceOrTribeOptions,
+  roomFlagOptions,
   customCommentFields,
   isFullModal,
   onToggleFullModal,
@@ -98,16 +96,19 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   onDeleteComment,
   onAttachImageToComment,
   onRemoveAttachmentFromComment,
-  onAddNewRaceOrTribe,
+  onAddRoomFlagOption,
   onAddCustomFieldOption,
 }) => {
+  // Inline Room Flag Creation State
+  const [isAddingRoomFlag, setIsAddingRoomFlag] = useState(false);
+  const [newRoomFlagInput, setNewRoomFlagInput] = useState('');
+
   // Quick-Add Comment Form State
   const [newCategory, setNewCategory] = useState<string>(
     commentCategories[0]?.id || 'tablet'
   );
   const [newSpeakerOrTitle, setNewSpeakerOrTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newRaceOrTribe, setNewRaceOrTribe] = useState('');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, string>>({});
 
   // Editing existing comment state
@@ -115,7 +116,6 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   const [editCategory, setEditCategory] = useState('');
   const [editSpeaker, setEditSpeaker] = useState('');
   const [editContent, setEditContent] = useState('');
-  const [editRace, setEditRace] = useState('');
   const [editCustomFields, setEditCustomFields] = useState<Record<string, string>>({});
 
   // Highlighted comment (when jumping from a linked pin)
@@ -140,6 +140,24 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
     onUpdateCellMetadata({ tags: nextTags });
   };
 
+  const handleConfirmAddRoomFlag = async () => {
+    const clean = newRoomFlagInput.trim();
+    if (!clean) {
+      setIsAddingRoomFlag(false);
+      return;
+    }
+    await onAddRoomFlagOption(clean);
+    if (!cell.tags.includes(clean)) {
+      await onUpdateCellMetadata({ tags: [...cell.tags, clean] });
+    }
+    setNewRoomFlagInput('');
+    setIsAddingRoomFlag(false);
+  };
+
+  const availableRoomFlags = Array.from(
+    new Set([...roomFlagOptions, ...cell.tags])
+  );
+
   const handleAddCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContent.trim() && !newSpeakerOrTitle.trim()) return;
@@ -151,7 +169,6 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       category: newCategory,
       speakerOrTitle: newSpeakerOrTitle.trim() || undefined,
       content: newContent.trim(),
-      raceOrTribe: newRaceOrTribe.trim() || undefined,
       customFields:
         Object.keys(newCustomFields).length > 0 ? newCustomFields : undefined,
       resolved: false,
@@ -168,7 +185,6 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
     setEditCategory(comm.category);
     setEditSpeaker(comm.speakerOrTitle || '');
     setEditContent(comm.content);
-    setEditRace(comm.raceOrTribe || '');
     setEditCustomFields(comm.customFields || {});
   };
 
@@ -177,7 +193,6 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       category: editCategory,
       speakerOrTitle: editSpeaker.trim() || undefined,
       content: editContent.trim(),
-      raceOrTribe: editRace.trim() || undefined,
       customFields: editCustomFields,
     });
     setEditingCommentId(null);
@@ -275,13 +290,20 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
             }}
           />
 
-          {/* Room Feature Flags / Tags */}
+          {/* Room Feature Flags / Tags (Spoiler-Free Editable) */}
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-1.5">
             <span className="flex items-center gap-1 text-xs text-slate-400 mr-1 font-medium">
               <Tag size={12} className="text-amber-400" />
               <span>Room Flags:</span>
             </span>
-            {ROOM_TAG_SUGGESTIONS.map((tag) => {
+
+            {availableRoomFlags.length === 0 && !isAddingRoomFlag && (
+              <span className="text-[11px] text-slate-500 italic mr-1">
+                No room flags defined yet —
+              </span>
+            )}
+
+            {availableRoomFlags.map((tag) => {
               const active = cell.tags.includes(tag);
               return (
                 <button
@@ -298,6 +320,57 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                 </button>
               );
             })}
+
+            {isAddingRoomFlag ? (
+              <div className="inline-flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newRoomFlagInput}
+                  onChange={(e) => setNewRoomFlagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleConfirmAddRoomFlag();
+                    } else if (e.key === 'Escape') {
+                      setNewRoomFlagInput('');
+                      setIsAddingRoomFlag(false);
+                    }
+                  }}
+                  placeholder="New flag (e.g. Save Point)..."
+                  className="bg-slate-950 border border-amber-500/60 rounded-full px-2.5 py-0.5 text-[11px] text-slate-100 focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleConfirmAddRoomFlag}
+                  className="p-1 rounded-full bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30"
+                  title="Add & Tag Room"
+                >
+                  <Check size={11} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewRoomFlagInput('');
+                    setIsAddingRoomFlag(false);
+                  }}
+                  className="p-1 rounded-full bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700"
+                  title="Cancel"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAddingRoomFlag(true)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-950 hover:bg-slate-800 text-amber-300 border border-dashed border-slate-700 hover:border-amber-500/50 transition-colors"
+                title="Create a new custom Room Flag option"
+              >
+                <Plus size={11} />
+                <span>Add Room Flag</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -353,20 +426,14 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                               </option>
                             ))}
                           </select>
-                          <RaceTribeSelector
-                            value={editRace}
-                            options={raceOrTribeOptions}
-                            onChange={setEditRace}
-                            onAddNewOption={onAddNewRaceOrTribe}
+                          <input
+                            type="text"
+                            value={editSpeaker}
+                            onChange={(e) => setEditSpeaker(e.target.value)}
+                            placeholder='Speaker or Title (e.g., "NPC Thor", "T2: Prophecy")'
+                            className="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-slate-100"
                           />
                         </div>
-                        <input
-                          type="text"
-                          value={editSpeaker}
-                          onChange={(e) => setEditSpeaker(e.target.value)}
-                          placeholder='Speaker or Title (e.g., "NPC Thor", "T2: Prophecy")'
-                          className="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-slate-100"
-                        />
                         <textarea
                           rows={3}
                           value={editContent}
@@ -462,12 +529,6 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                           {comm.speakerOrTitle && (
                             <span className="font-bold text-xs text-slate-100">
                               {comm.speakerOrTitle}
-                            </span>
-                          )}
-
-                          {comm.raceOrTribe && (
-                            <span className="px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 text-[10px] font-semibold">
-                              {comm.raceOrTribe}
                             </span>
                           )}
                         </div>
@@ -614,7 +675,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                 <select
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-slate-100 focus:outline-none focus:border-amber-400"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
                 >
                   {commentCategories.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -626,25 +687,16 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
 
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">
-                  Race / Tribe (Spoiler-Free Editable)
+                  Speaker or Tablet Header
                 </label>
-                <RaceTribeSelector
-                  value={newRaceOrTribe}
-                  options={raceOrTribeOptions}
-                  onChange={setNewRaceOrTribe}
-                  onAddNewOption={onAddNewRaceOrTribe}
+                <input
+                  type="text"
+                  value={newSpeakerOrTitle}
+                  onChange={(e) => setNewSpeakerOrTitle(e.target.value)}
+                  placeholder='e.g., "NPC Thor", "T2: Prophecy"'
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
                 />
               </div>
-            </div>
-
-            <div>
-              <input
-                type="text"
-                value={newSpeakerOrTitle}
-                onChange={(e) => setNewSpeakerOrTitle(e.target.value)}
-                placeholder='Speaker or Tablet Header (e.g., "NPC Thor (after Mjolnir)", "T2: Seeress Prophecy")'
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
-              />
             </div>
 
             <div>

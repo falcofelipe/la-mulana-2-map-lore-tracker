@@ -2,8 +2,9 @@
  * CommentsTableView Component
  * ---------------------------
  * Full-screen spreadsheet-style relational database view replacing the Excel
- * "Comments" tab. Supports multi-column filtering, instant keyword search,
- * custom comment field columns, image/sketch attachments, and one-click
+ * "Comments" tab. Supports multi-column filtering (including user-defined
+ * filterable custom fields), instant keyword search, full inline row editing
+ * with automatic Map + Cell migration, image/sketch attachments, and one-click
  * jump to any room on the Map Grid.
  */
 
@@ -18,6 +19,9 @@ import {
   ImagePlus,
   Plus,
   RotateCcw,
+  Edit3,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   CommentCategoryDefinition,
@@ -26,10 +30,10 @@ import {
   GridCell,
   MapPage,
 } from '../../types/models';
+import { normalizeCellCoord } from '../../utils/coordinates';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { CustomSelectDropdown } from './CustomSelectDropdown';
-import { RaceTribeSelector } from './RaceTribeSelector';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
 /**
@@ -79,7 +83,6 @@ interface CommentsTableViewProps {
   cells: GridCell[];
   comments: CommentEntry[];
   commentCategories: CommentCategoryDefinition[];
-  raceOrTribeOptions: string[];
   customCommentFields: CustomFieldDefinition[];
   onJumpToRoom: (mapId: string, cellCoord: string) => void;
   onCreateComment: (
@@ -92,7 +95,6 @@ interface CommentsTableViewProps {
   onDeleteComment: (commentId: string) => Promise<void>;
   onAttachImageToComment: (commentId: string, blob: Blob) => Promise<string>;
   onRemoveAttachmentFromComment: (commentId: string, blobId: string) => Promise<void>;
-  onAddNewRaceOrTribe: (name: string) => Promise<void>;
   onAddCustomFieldOption: (fieldId: string, newOption: string) => Promise<void>;
 }
 
@@ -101,7 +103,6 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   cells,
   comments,
   commentCategories,
-  raceOrTribeOptions,
   customCommentFields,
   onJumpToRoom,
   onCreateComment,
@@ -109,14 +110,15 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   onDeleteComment,
   onAttachImageToComment,
   onRemoveAttachmentFromComment,
-  onAddNewRaceOrTribe,
   onAddCustomFieldOption,
 }) => {
   // Multi-column Filter States
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMapId, setFilterMapId] = useState('ALL');
   const [filterCategory, setFilterCategory] = useState('ALL');
-  const [filterRace, setFilterRace] = useState('ALL');
+  const [customFieldFilters, setCustomFieldFilters] = useState<
+    Record<string, string>
+  >({});
   const [onlyUnresolvedTodos, setOnlyUnresolvedTodos] = useState(false);
 
   // Quick Add Row State
@@ -128,13 +130,25 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   );
   const [addSpeaker, setAddSpeaker] = useState('');
   const [addContent, setAddContent] = useState('');
-  const [addRace, setAddRace] = useState('');
-  const [addCustomFields, setAddCustomFields] = useState<Record<string, string>>({});
+  const [addCustomFields, setAddCustomFields] = useState<Record<string, string>>(
+    {}
+  );
+
+  // Full Row Edit State (Milestone B.3)
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editMapId, setEditMapId] = useState('');
+  const [editCoord, setEditCoord] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editSpeaker, setEditSpeaker] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editCustomFields, setEditCustomFields] = useState<
+    Record<string, string>
+  >({});
 
   // Sketch Modal Target
-  const [sketchTargetCommentId, setSketchTargetCommentId] = useState<string | null>(
-    null
-  );
+  const [sketchTargetCommentId, setSketchTargetCommentId] = useState<
+    string | null
+  >(null);
 
   // Lookup Maps for fast relational resolution
   const mapById = useMemo(
@@ -160,6 +174,34 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     [customCommentFields]
   );
 
+  const hiddenCustomFields = useMemo(
+    () => customCommentFields.filter((f) => !f.showInTable),
+    [customCommentFields]
+  );
+
+  const filterableCustomFields = useMemo(
+    () => customCommentFields.filter((f) => f.filterable),
+    [customCommentFields]
+  );
+
+  // Compute distinct options for each filterable custom field
+  const filterOptionsByFieldId = useMemo(() => {
+    const result = new Map<string, string[]>();
+    for (const field of filterableCustomFields) {
+      const set = new Set<string>(field.options || []);
+      for (const comm of comments) {
+        const val = comm.customFields?.[field.id]?.trim();
+        if (val) set.add(val);
+      }
+      result.set(field.id, Array.from(set));
+    }
+    return result;
+  }, [filterableCustomFields, comments]);
+
+  const hasActiveCustomFilter = Object.values(customFieldFilters).some(
+    (val) => Boolean(val && val !== 'ALL')
+  );
+
   const filteredComments = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -167,14 +209,21 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       if (filterMapId !== 'ALL' && comm.mapId !== filterMapId) return false;
       if (filterCategory !== 'ALL' && comm.category !== filterCategory)
         return false;
-      if (filterRace !== 'ALL' && (comm.raceOrTribe || '') !== filterRace)
-        return false;
       if (onlyUnresolvedTodos && (comm.category !== 'todo' || comm.resolved))
         return false;
 
+      // Check dynamic custom field filters
+      for (const [fieldId, filterVal] of Object.entries(customFieldFilters)) {
+        if (!filterVal || filterVal === 'ALL') continue;
+        const commVal = comm.customFields?.[fieldId] || '';
+        if (commVal !== filterVal) return false;
+      }
+
       if (q) {
         const mapObj = mapById.get(comm.mapId);
-        const cellObj = cellByMapAndCoord.get(`${comm.mapId}::${comm.cellCoord}`);
+        const cellObj = cellByMapAndCoord.get(
+          `${comm.mapId}::${comm.cellCoord}`
+        );
         const roomName = cellObj?.roomName || '';
         const customVals = comm.customFields
           ? Object.values(comm.customFields).join(' ')
@@ -187,7 +236,6 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
           roomName,
           comm.speakerOrTitle,
           comm.content,
-          comm.raceOrTribe,
           customVals,
         ]
           .filter(Boolean)
@@ -204,7 +252,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     searchQuery,
     filterMapId,
     filterCategory,
-    filterRace,
+    customFieldFilters,
     onlyUnresolvedTodos,
     mapById,
     cellByMapAndCoord,
@@ -217,9 +265,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     const targetMapId = addMapId || maps[0]?.id;
     if (!targetMapId) return;
 
-    const cleanCoord = addCoord.trim().toUpperCase().startsWith('$')
-      ? addCoord.trim().toUpperCase()
-      : `$${addCoord.trim().toUpperCase().replace(/([A-Z]+)(\d+)/, '$1$$$2')}`;
+    const cleanCoord = normalizeCellCoord(addCoord);
 
     await onCreateComment({
       mapId: targetMapId,
@@ -227,7 +273,6 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       category: addCategory,
       speakerOrTitle: addSpeaker.trim() || undefined,
       content: addContent.trim(),
-      raceOrTribe: addRace.trim() || undefined,
       customFields:
         Object.keys(addCustomFields).length > 0 ? addCustomFields : undefined,
       resolved: false,
@@ -240,11 +285,36 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     setIsAddingRow(false);
   };
 
+  const handleStartRowEdit = (comm: CommentEntry) => {
+    setEditingCommentId(comm.id);
+    setEditMapId(comm.mapId);
+    setEditCoord(comm.cellCoord);
+    setEditCategory(comm.category);
+    setEditSpeaker(comm.speakerOrTitle || '');
+    setEditContent(comm.content);
+    setEditCustomFields({ ...(comm.customFields || {}) });
+  };
+
+  const handleSaveRowEdit = async (commentId: string) => {
+    const cleanCoord = normalizeCellCoord(editCoord);
+    if (!editMapId || !cleanCoord) return;
+
+    await onUpdateComment(commentId, {
+      mapId: editMapId,
+      cellCoord: cleanCoord,
+      category: editCategory,
+      speakerOrTitle: editSpeaker.trim() || undefined,
+      content: editContent.trim(),
+      customFields: editCustomFields,
+    });
+    setEditingCommentId(null);
+  };
+
   const resetFilters = () => {
     setSearchQuery('');
     setFilterMapId('ALL');
     setFilterCategory('ALL');
-    setFilterRace('ALL');
+    setCustomFieldFilters({});
     setOnlyUnresolvedTodos(false);
   };
 
@@ -299,19 +369,32 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
             ))}
           </select>
 
-          {/* Filter by Race/Tribe */}
-          <select
-            value={filterRace}
-            onChange={(e) => setFilterRace(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
-          >
-            <option value="ALL">All Races / Tribes</option>
-            {raceOrTribeOptions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          {/* Dynamic Filter Dropdowns for Filterable Custom Fields */}
+          {filterableCustomFields.map((field) => {
+            const options = filterOptionsByFieldId.get(field.id) || [];
+            const activeVal = customFieldFilters[field.id] || 'ALL';
+            return (
+              <select
+                key={field.id}
+                value={activeVal}
+                onChange={(e) =>
+                  setCustomFieldFilters((prev) => ({
+                    ...prev,
+                    [field.id]: e.target.value,
+                  }))
+                }
+                className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                title={`Filter by ${field.name}`}
+              >
+                <option value="ALL">All {field.name}</option>
+                {options.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            );
+          })}
 
           {/* Unresolved TODOs Toggle */}
           <button
@@ -329,7 +412,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
           {(searchQuery ||
             filterMapId !== 'ALL' ||
             filterCategory !== 'ALL' ||
-            filterRace !== 'ALL' ||
+            hasActiveCustomFilter ||
             onlyUnresolvedTodos) && (
             <button
               type="button"
@@ -345,8 +428,9 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
         {/* Right Side: Count & Quick Add Button */}
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400">
-            Showing <strong className="text-slate-100">{filteredComments.length}</strong> of{' '}
-            {comments.length} entries
+            Showing{' '}
+            <strong className="text-slate-100">{filteredComments.length}</strong>{' '}
+            of {comments.length} entries
           </span>
           <button
             type="button"
@@ -365,9 +449,11 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
           onSubmit={handleQuickAddSubmit}
           className="bg-slate-900 border border-amber-500/50 rounded-xl p-4 flex flex-col gap-3 shrink-0 shadow-xl"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Map</label>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Map
+              </label>
               <select
                 value={addMapId}
                 onChange={(e) => setAddMapId(e.target.value)}
@@ -421,18 +507,6 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                 onChange={(e) => setAddSpeaker(e.target.value)}
                 placeholder="e.g. NPC Thor / T1"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Race / Tribe
-              </label>
-              <RaceTribeSelector
-                value={addRace}
-                options={raceOrTribeOptions}
-                onChange={setAddRace}
-                onAddNewOption={onAddNewRaceOrTribe}
               />
             </div>
           </div>
@@ -514,22 +588,23 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
               <th className="py-3 px-3 w-24">Cell</th>
               <th className="py-3 px-3.5 w-48">Room Name</th>
               <th className="py-3 px-3 w-24">Type</th>
-              <th className="py-3 px-4 min-w-[320px]">Replies / Tablet &amp; NPC Content</th>
-              <th className="py-3 px-3.5 w-36">Race / Tribe</th>
+              <th className="py-3 px-4 min-w-[320px]">
+                Replies / Tablet &amp; NPC Content
+              </th>
               {visibleCustomColumns.map((col) => (
                 <th key={col.id} className="py-3 px-3.5 w-36">
                   {col.name}
                 </th>
               ))}
               <th className="py-3 px-3.5 w-44">Sketches / Images</th>
-              <th className="py-3 px-3.5 w-28 text-right">Actions</th>
+              <th className="py-3 px-3.5 w-32 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/70">
             {filteredComments.length === 0 ? (
               <tr>
                 <td
-                  colSpan={8 + visibleCustomColumns.length}
+                  colSpan={7 + visibleCustomColumns.length}
                   className="py-12 text-center text-slate-500"
                 >
                   No comments or lore entries match the current filters.
@@ -537,6 +612,231 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
               </tr>
             ) : (
               filteredComments.map((comm) => {
+                const isEditing = editingCommentId === comm.id;
+
+                if (isEditing) {
+                  const previewNormalizedCoord = normalizeCellCoord(editCoord);
+                  const previewCellObj = cellByMapAndCoord.get(
+                    `${editMapId}::${previewNormalizedCoord}`
+                  );
+                  const editMapCells = cells.filter(
+                    (c) => c.mapId === editMapId && c.state !== 'blocked_x'
+                  );
+
+                  return (
+                    <tr
+                      key={comm.id}
+                      className="bg-amber-500/5 border-y border-amber-500/40"
+                    >
+                      {/* Edit Map */}
+                      <td className="py-3 px-3.5 align-top">
+                        <select
+                          value={editMapId}
+                          onChange={(e) => setEditMapId(e.target.value)}
+                          className="w-full bg-slate-950 border border-amber-500/60 rounded px-2 py-1.5 text-xs text-slate-100 focus:outline-none"
+                        >
+                          {maps.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.codePrefix} — {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      {/* Edit Cell Coordinate */}
+                      <td className="py-3 px-3 align-top">
+                        <input
+                          type="text"
+                          list={`cell-coords-${comm.id}`}
+                          value={editCoord}
+                          onChange={(e) => setEditCoord(e.target.value)}
+                          placeholder="$C$2"
+                          className="w-20 bg-slate-950 border border-amber-500/60 rounded px-2 py-1.5 font-mono font-bold text-xs text-amber-300 focus:outline-none"
+                        />
+                        <datalist id={`cell-coords-${comm.id}`}>
+                          {editMapCells.map((c) => (
+                            <option key={c.id} value={c.coord}>
+                              {c.roomName ? `${c.coord} — ${c.roomName}` : c.coord}
+                            </option>
+                          ))}
+                        </datalist>
+                      </td>
+
+                      {/* Live Resolved Room Name Preview */}
+                      <td className="py-3 px-3.5 align-top">
+                        {previewCellObj ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium text-slate-200">
+                              {previewCellObj.roomName || (
+                                <span className="text-slate-500 italic">
+                                  Unnamed Room
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-[10px] text-emerald-400">
+                              ✓ Links to {previewNormalizedCoord}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-rose-400">
+                            Coordinate outside map grid
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Edit Category */}
+                      <td className="py-3 px-3 align-top">
+                        <select
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value)}
+                          className="w-full bg-slate-950 border border-amber-500/60 rounded px-1.5 py-1.5 text-[11px] text-slate-100 focus:outline-none"
+                        >
+                          {commentCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.code} — {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      {/* Edit Speaker + Content (+ any non-column custom fields) */}
+                      <td className="py-3 px-4 align-top">
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={editSpeaker}
+                            onChange={(e) => setEditSpeaker(e.target.value)}
+                            placeholder='Speaker or Title (e.g., "NPC Thor", "T2: Prophecy")'
+                            className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded px-2.5 py-1 text-xs font-semibold text-slate-100 focus:outline-none"
+                          />
+                          <textarea
+                            rows={3}
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            placeholder="Full transcript, quote, or TODO details..."
+                            className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded p-2 text-xs text-slate-100 focus:outline-none"
+                          />
+                          {hiddenCustomFields.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+                              {hiddenCustomFields.map((field) => (
+                                <div key={field.id}>
+                                  <label className="block text-[10px] text-slate-400 mb-0.5">
+                                    {field.name}
+                                  </label>
+                                  {field.type === 'select' ? (
+                                    <CustomSelectDropdown
+                                      value={editCustomFields[field.id] || ''}
+                                      options={field.options || []}
+                                      placeholder="—"
+                                      compact
+                                      onChange={(val) =>
+                                        setEditCustomFields((prev) => ({
+                                          ...prev,
+                                          [field.id]: val,
+                                        }))
+                                      }
+                                      onAddNewOption={(newOpt) =>
+                                        onAddCustomFieldOption(field.id, newOpt)
+                                      }
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={editCustomFields[field.id] || ''}
+                                      onChange={(e) =>
+                                        setEditCustomFields((prev) => ({
+                                          ...prev,
+                                          [field.id]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100"
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Edit Visible Custom Columns */}
+                      {visibleCustomColumns.map((col) => (
+                        <td key={col.id} className="py-3 px-3.5 align-top">
+                          {col.type === 'select' ? (
+                            <CustomSelectDropdown
+                              value={editCustomFields[col.id] || ''}
+                              options={col.options || []}
+                              placeholder="—"
+                              compact
+                              onChange={(nextVal) =>
+                                setEditCustomFields((prev) => ({
+                                  ...prev,
+                                  [col.id]: nextVal,
+                                }))
+                              }
+                              onAddNewOption={(newOpt) =>
+                                onAddCustomFieldOption(col.id, newOpt)
+                              }
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={editCustomFields[col.id] || ''}
+                              onChange={(e) =>
+                                setEditCustomFields((prev) => ({
+                                  ...prev,
+                                  [col.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="—"
+                              className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded px-2 py-1 text-[11px] text-slate-100 focus:outline-none"
+                            />
+                          )}
+                        </td>
+                      ))}
+
+                      {/* Sketches / Images */}
+                      <td className="py-3 px-3.5 align-top">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {comm.attachmentBlobIds.map((blobId) => (
+                            <BlobImagePreview
+                              key={blobId}
+                              blobId={blobId}
+                              className="w-14 h-10"
+                              onRemove={() =>
+                                onRemoveAttachmentFromComment(comm.id, blobId)
+                              }
+                            />
+                          ))}
+                        </div>
+                      </td>
+
+                      {/* Save / Cancel Edit Actions */}
+                      <td className="py-3 px-3.5 align-top text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRowEdit(comm.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs shadow"
+                            title="Save changes & migrate room cell if changed"
+                          >
+                            <Check size={13} />
+                            <span>Save</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCommentId(null)}
+                            className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                            title="Cancel editing"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
                 const mapObj = mapById.get(comm.mapId);
                 const cellObj = cellByMapAndCoord.get(
                   `${comm.mapId}::${comm.cellCoord}`
@@ -582,7 +882,9 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                     {/* Auto-Resolved Room Name */}
                     <td className="py-3 px-3.5 align-top font-medium text-slate-200">
                       {cellObj?.roomName || (
-                        <span className="text-slate-600 italic">Unnamed Room</span>
+                        <span className="text-slate-600 italic">
+                          Unnamed Room
+                        </span>
                       )}
                     </td>
 
@@ -614,32 +916,6 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       >
                         {renderHighlightedLoreText(comm.content)}
                       </div>
-                    </td>
-
-                    {/* Race / Tribe */}
-                    <td className="py-3 px-3.5 align-top">
-                      <select
-                        value={comm.raceOrTribe || ''}
-                        onChange={(e) =>
-                          onUpdateComment(comm.id, {
-                            raceOrTribe: e.target.value || undefined,
-                          })
-                        }
-                        className="w-full bg-slate-950/90 border border-slate-800 rounded px-2 py-1 text-[11px] text-purple-300 font-medium"
-                      >
-                        <option value="">—</option>
-                        {raceOrTribeOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                        {comm.raceOrTribe &&
-                          !raceOrTribeOptions.includes(comm.raceOrTribe) && (
-                            <option value={comm.raceOrTribe}>
-                              {comm.raceOrTribe}
-                            </option>
-                          )}
-                      </select>
                     </td>
 
                     {/* Custom User-Defined Columns */}
@@ -725,8 +1001,18 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       <div className="inline-flex items-center gap-1">
                         <button
                           type="button"
+                          onClick={() => handleStartRowEdit(comm)}
+                          className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border border-slate-800"
+                          title="Edit row (Map, Cell Coordinate, Category, Speaker, Content & Custom Fields)"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() =>
-                            onUpdateComment(comm.id, { resolved: !comm.resolved })
+                            onUpdateComment(comm.id, {
+                              resolved: !comm.resolved,
+                            })
                           }
                           className={`p-1.5 rounded border ${
                             comm.resolved

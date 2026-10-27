@@ -49,3 +49,15 @@ export function parseCellCoord(coord: string): { row: number; col: number } | nu
   const row = Math.max(0, parseInt(match[2], 10) - 1);
   return { row, col };
 }
+
+/**
+ * Normalizes user coordinate input (e.g., "c2", "C2", "$C2", "$C$2") into
+ * canonical "$C$2" format if valid, or returns the uppercased trimmed string.
+ */
+export function normalizeCellCoord(input: string): string {
+  const parsed = parseCellCoord(input);
+  if (parsed) {
+    return formatCellCoord(parsed.row, parsed.col);
+  }
+  return input.trim().toUpperCase();
+}

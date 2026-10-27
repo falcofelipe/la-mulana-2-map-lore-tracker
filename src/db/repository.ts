@@ -21,7 +21,10 @@ import {
   createBlankInitialMap,
   createDefaultProjectConfig,
 } from '../config/defaultDefinitions';
-import { formatCellCoord } from '../utils/coordinates';
+import {
+  formatCellCoord,
+  normalizeCellCoord,
+} from '../utils/coordinates';
 import { db } from './database';
 import {
   processAndStoreAttachmentImage,
@@ -565,23 +568,21 @@ export async function createCommentEntry(
   input: Omit<CommentEntry, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<CommentEntry> {
   const now = Date.now();
+  const normalizedCoord = normalizeCellCoord(input.cellCoord);
+
   // Resolve cellId automatically if not provided
   let resolvedCellId = input.cellId;
-  if (!resolvedCellId && input.mapId && input.cellCoord) {
+  if (!resolvedCellId && input.mapId && normalizedCoord) {
     const matchingCell = await db.cells
       .where('[mapId+coord]')
-      .equals([input.mapId, input.cellCoord])
+      .equals([input.mapId, normalizedCoord])
       .first();
     resolvedCellId = matchingCell?.id;
   }
 
-  // If the user typed a new raceOrTribe, ensure it is saved in ProjectConfig.raceOrTribeOptions
-  if (input.raceOrTribe?.trim()) {
-    await addRaceOrTribeOption(input.raceOrTribe.trim());
-  }
-
   const entry: CommentEntry = {
     ...input,
+    cellCoord: normalizedCoord,
     cellId: resolvedCellId,
     id: `comm-${now}-${Math.random().toString(36).slice(2, 7)}`,
     createdAt: now,
@@ -596,11 +597,35 @@ export async function updateCommentEntry(
   commentId: string,
   updates: Partial<Omit<CommentEntry, 'id' | 'createdAt'>>
 ): Promise<void> {
-  if (updates.raceOrTribe?.trim()) {
-    await addRaceOrTribeOption(updates.raceOrTribe.trim());
-  }
-  await db.comments.update(commentId, {
+  const existing = await db.comments.get(commentId);
+  if (!existing) return;
+
+  const nextUpdates: Partial<Omit<CommentEntry, 'id' | 'createdAt'>> = {
     ...updates,
+  };
+
+  if (nextUpdates.cellCoord !== undefined) {
+    nextUpdates.cellCoord = normalizeCellCoord(nextUpdates.cellCoord);
+  }
+
+  const targetMapId = nextUpdates.mapId ?? existing.mapId;
+  const targetCoord = nextUpdates.cellCoord ?? existing.cellCoord;
+
+  // Automatically resolve and migrate cellId when Map or Cell Coordinate changes
+  if (
+    (nextUpdates.mapId !== undefined && nextUpdates.mapId !== existing.mapId) ||
+    (nextUpdates.cellCoord !== undefined &&
+      nextUpdates.cellCoord !== existing.cellCoord)
+  ) {
+    const matchingCell = await db.cells
+      .where('[mapId+coord]')
+      .equals([targetMapId, targetCoord])
+      .first();
+    nextUpdates.cellId = matchingCell?.id;
+  }
+
+  await db.comments.update(commentId, {
+    ...nextUpdates,
     updatedAt: Date.now(),
   });
 }
@@ -707,49 +732,62 @@ export async function deleteSketchNote(sketchId: string): Promise<void> {
 }
 
 // ============================================================================
-// 6. PROJECT CUSTOMIZATION (MARKERS, RACE/TRIBES, CUSTOM COMMENT FIELDS)
+// 6. PROJECT CUSTOMIZATION (MARKERS, ROOM FLAGS, CUSTOM COMMENT FIELDS)
 // ============================================================================
 
-export async function addRaceOrTribeOption(optionName: string): Promise<void> {
-  const clean = optionName.trim();
+export async function addRoomFlagOption(flagName: string): Promise<void> {
+  const clean = flagName.trim();
   if (!clean) return;
 
   const config = await db.config.get('singleton');
   if (!config) return;
 
-  const exists = config.raceOrTribeOptions.some(
+  const existing = config.roomFlagOptions || [];
+  const exists = existing.some(
     (opt) => opt.toLowerCase() === clean.toLowerCase()
   );
   if (!exists) {
     await db.config.update('singleton', {
-      raceOrTribeOptions: [...config.raceOrTribeOptions, clean],
+      roomFlagOptions: [...existing, clean],
       updatedAt: Date.now(),
     });
   }
 }
 
-export async function updateRaceOrTribeOptions(
+export async function updateRoomFlagOptions(
   nextOptions: string[],
-  renamedFromTo?: { oldName: string; newName: string }
+  renamedOrDeleted?: { oldName: string; newName: string }
 ): Promise<void> {
-  await db.transaction('rw', [db.config, db.comments], async () => {
+  const now = Date.now();
+  await db.transaction('rw', [db.config, db.cells], async () => {
     await db.config.update('singleton', {
-      raceOrTribeOptions: nextOptions,
-      updatedAt: Date.now(),
+      roomFlagOptions: nextOptions,
+      updatedAt: now,
     });
 
-    if (renamedFromTo && renamedFromTo.oldName !== renamedFromTo.newName) {
-      const matching = await db.comments
-        .where('raceOrTribe')
-        .equals(renamedFromTo.oldName)
-        .toArray();
-      if (matching.length > 0) {
-        await db.comments.bulkPut(
-          matching.map((c) => ({
-            ...c,
-            raceOrTribe: renamedFromTo.newName || undefined,
-            updatedAt: Date.now(),
-          }))
+    if (renamedOrDeleted && renamedOrDeleted.oldName !== renamedOrDeleted.newName) {
+      const allCells = await db.cells.toArray();
+      const affectedCells = allCells.filter((c) =>
+        c.tags.includes(renamedOrDeleted.oldName)
+      );
+      if (affectedCells.length > 0) {
+        await db.cells.bulkPut(
+          affectedCells.map((c) => {
+            const nextTags = renamedOrDeleted.newName
+              ? Array.from(
+                  new Set(
+                    c.tags.map((t) =>
+                      t === renamedOrDeleted.oldName ? renamedOrDeleted.newName : t
+                    )
+                  )
+                )
+              : c.tags.filter((t) => t !== renamedOrDeleted.oldName);
+            return {
+              ...c,
+              tags: nextTags,
+              updatedAt: now,
+            };
+          })
         );
       }
     }
@@ -809,6 +847,51 @@ export async function addCustomFieldOption(
   await db.config.update('singleton', {
     customCommentFields: updatedFields,
     updatedAt: Date.now(),
+  });
+}
+
+export async function updateCustomFieldOptions(
+  fieldId: string,
+  nextOptions: string[],
+  renamedOrDeleted?: { oldName: string; newName: string }
+): Promise<void> {
+  const now = Date.now();
+  await db.transaction('rw', [db.config, db.comments], async () => {
+    const config = await db.config.get('singleton');
+    if (!config) return;
+
+    const updatedFields = config.customCommentFields.map((field) =>
+      field.id === fieldId ? { ...field, options: nextOptions } : field
+    );
+
+    await db.config.update('singleton', {
+      customCommentFields: updatedFields,
+      updatedAt: now,
+    });
+
+    if (renamedOrDeleted && renamedOrDeleted.oldName !== renamedOrDeleted.newName) {
+      const allComments = await db.comments.toArray();
+      const affected = allComments.filter(
+        (c) => c.customFields?.[fieldId] === renamedOrDeleted.oldName
+      );
+      if (affected.length > 0) {
+        await db.comments.bulkPut(
+          affected.map((c) => {
+            const nextCustom = { ...(c.customFields || {}) };
+            if (renamedOrDeleted.newName) {
+              nextCustom[fieldId] = renamedOrDeleted.newName;
+            } else {
+              delete nextCustom[fieldId];
+            }
+            return {
+              ...c,
+              customFields: nextCustom,
+              updatedAt: now,
+            };
+          })
+        );
+      }
+    }
   });
 }
 

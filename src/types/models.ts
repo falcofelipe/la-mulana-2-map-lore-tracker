@@ -63,6 +63,7 @@ export interface CustomFieldDefinition {
   type: 'text' | 'select';
   options?: string[];       // Used when type === 'select'
   showInTable: boolean;     // Whether to render as a column in CommentsTableView
+  filterable?: boolean;     // Whether to render a filter dropdown in CommentsTableView top bar
 }
 
 /**
@@ -75,9 +76,9 @@ export interface ProjectConfig {
   commentCategories: CommentCategoryDefinition[];
   /**
    * Starts empty by default to prevent spoilers for new playthroughs.
-   * Players can add/edit tribes/races inline as they discover them.
+   * Players can add/edit room flags (e.g., "Save Point") inline as they discover them.
    */
-  raceOrTribeOptions: string[];
+  roomFlagOptions: string[];
   customCommentFields: CustomFieldDefinition[];
   updatedAt: number;
 }
@@ -155,8 +156,7 @@ export interface CommentEntry {
   category: string;         // References CommentCategoryDefinition.id
   speakerOrTitle?: string;  // e.g., "NPC Thor (after Mjolnir)", "T2: The Alfr Seeress' Prophecy P1"
   content: string;          // Full transcript, riddle text, or TODO details
-  raceOrTribe?: string;     // Filterable tribe/race tag (e.g., "6 AESIR", "Underworld")
-  customFields?: Record<string, string>; // Values for user-defined CustomFieldDefinitions
+  customFields?: Record<string, string>; // Values for user-defined CustomFieldDefinitions (text or select)
   resolved: boolean;        // Completion flag (primarily for 'todo' entries)
   attachmentBlobIds: string[]; // Attached tablet symbol crops or freehand sketches
   createdAt: number;

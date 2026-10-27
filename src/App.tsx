@@ -12,7 +12,7 @@ import { db, ensureDatabaseInitialized } from './db/database';
 import {
   addCustomFieldOption,
   addPinMarkerToCell,
-  addRaceOrTribeOption,
+  addRoomFlagOption,
   addVectorArrowToCell,
   assignCellScreenshot,
   attachImageToComment,
@@ -35,9 +35,10 @@ import {
   toggleCellBlockedState,
   updateCellMetadata,
   updateCommentEntry,
+  updateCustomFieldOptions,
   updateMapPageMetadata,
   updatePinMarkerOnCell,
-  updateRaceOrTribeOptions,
+  updateRoomFlagOptions,
   updateSketchNote,
   updateVectorArrowOnCell,
 } from './db/repository';
@@ -303,7 +304,7 @@ export const App: React.FC = () => {
                 roomComments={inspectedRoomComments}
                 markerDefinitions={config.markerDefinitions}
                 commentCategories={config.commentCategories}
-                raceOrTribeOptions={config.raceOrTribeOptions}
+                roomFlagOptions={config.roomFlagOptions || []}
                 customCommentFields={config.customCommentFields}
                 isFullModal={isInspectorFullModal}
                 onToggleFullModal={() =>
@@ -337,7 +338,7 @@ export const App: React.FC = () => {
                 onDeleteComment={deleteCommentEntry}
                 onAttachImageToComment={attachImageToComment}
                 onRemoveAttachmentFromComment={removeAttachmentFromComment}
-                onAddNewRaceOrTribe={addRaceOrTribeOption}
+                onAddRoomFlagOption={addRoomFlagOption}
                 onAddCustomFieldOption={addCustomFieldOption}
               />
             )}
@@ -352,7 +353,6 @@ export const App: React.FC = () => {
           cells={allCells}
           comments={allComments}
           commentCategories={config.commentCategories}
-          raceOrTribeOptions={config.raceOrTribeOptions}
           customCommentFields={config.customCommentFields}
           onJumpToRoom={handleJumpToRoom}
           onCreateComment={createCommentEntry}
@@ -360,7 +360,6 @@ export const App: React.FC = () => {
           onDeleteComment={deleteCommentEntry}
           onAttachImageToComment={attachImageToComment}
           onRemoveAttachmentFromComment={removeAttachmentFromComment}
-          onAddNewRaceOrTribe={addRaceOrTribeOption}
           onAddCustomFieldOption={addCustomFieldOption}
         />
       )}
@@ -394,8 +393,9 @@ export const App: React.FC = () => {
             });
           }}
           onSaveMarkerDefinitions={saveMarkerDefinitions}
-          onUpdateRaceOrTribeOptions={updateRaceOrTribeOptions}
+          onUpdateRoomFlagOptions={updateRoomFlagOptions}
           onSaveCustomCommentFields={saveCustomCommentFields}
+          onUpdateCustomFieldOptions={updateCustomFieldOptions}
           onExportZip={exportFullBackupZip}
           onImportZip={async (file) => {
             const firstMapId = await importFullBackupZip(file);

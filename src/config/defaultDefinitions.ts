@@ -113,21 +113,10 @@ export const DEFAULT_COMMENT_CATEGORIES: CommentCategoryDefinition[] = [
   },
 ];
 
-export const ROOM_TAG_SUGGESTIONS: string[] = [
-  'Save Point',
-  'Grail Tablet',
-  'Ankh Jewel',
-  'Boss Room',
-  'Shop',
-  'Blood Corridor',
-  'Dissonance',
-  'Gate / Portal',
-];
-
 /**
  * Creates a clean, spoiler-free ProjectConfig for fresh installations.
- * Notice `raceOrTribeOptions` starts completely empty so new players can
- * add races/tribes organically as they discover them in-game.
+ * Notice `roomFlagOptions` and `customCommentFields` start completely empty
+ * so new players can add flags and custom dropdowns organically as they play.
  */
 export function createDefaultProjectConfig(): ProjectConfig {
   return {
@@ -135,7 +124,7 @@ export function createDefaultProjectConfig(): ProjectConfig {
     projectTitle: 'La-Mulana 2 Expedition Log',
     markerDefinitions: DEFAULT_MARKER_DEFINITIONS,
     commentCategories: DEFAULT_COMMENT_CATEGORIES,
-    raceOrTribeOptions: [],
+    roomFlagOptions: [],
     customCommentFields: [],
     updatedAt: Date.now(),
   };

@@ -127,11 +127,14 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       if (!mapObj) continue;
       const cellObj = cellByMapAndCoord.get(`${comm.mapId}::${comm.cellCoord}`);
 
+      const customValsList = comm.customFields
+        ? Object.values(comm.customFields).filter(Boolean)
+        : [];
       const commHaystack = `${mapObj.codePrefix} ${comm.cellCoord} ${
         cellObj?.roomName || ''
-      } ${comm.speakerOrTitle || ''} ${comm.content} ${
-        comm.raceOrTribe || ''
-      }`.toLowerCase();
+      } ${comm.speakerOrTitle || ''} ${comm.content} ${customValsList.join(
+        ' '
+      )}`.toLowerCase();
 
       if (!q || commHaystack.includes(q)) {
         list.push({
@@ -147,9 +150,10 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               cellObj?.roomName || comm.cellCoord
             }`,
           subtitle: comm.content,
-          badge: comm.raceOrTribe
-            ? `${comm.category.toUpperCase()} • ${comm.raceOrTribe}`
-            : comm.category.toUpperCase(),
+          badge:
+            customValsList.length > 0
+              ? `${comm.category.toUpperCase()} • ${customValsList.join(' • ')}`
+              : comm.category.toUpperCase(),
         });
       }
     }
