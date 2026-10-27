@@ -57,7 +57,45 @@ An Excel `.xlsx` file is actually a standard ZIP archive containing:
 
 ---
 
-## 4. Automated Unit & Integration Test Suite
+## 4. Relational Cross-References on Comments ("Related To" Comments, TODOs & Cells)
+**Goal:** Allow linking any comment/tablet/NPC/TODO entry to other comments/TODOs or other map cells so multi-room riddles can be cross-referenced with 1 click.
+
+### Why This Does Not Bloat the Database
+- Uses two lightweight ID arrays on `CommentEntry` (~30–50 bytes per entry):
+  - `relatedCommentIds?: string[]` (links to other Tablets, NPC quotes, or TODOs).
+  - `relatedCellIds?: string[]` (links to other `GridCell.id` rooms on the current map or other maps).
+- **Automatic Backlinks (Zero Duplicate Storage):** Because all comments are loaded in memory via Dexie, if Tablet A links to TODO B, viewing TODO B can automatically display *"Referenced by: Tablet A (`YgA $C$1`)"* dynamically without storing duplicate backlink arrays in IndexedDB.
+
+---
+
+## 5. Structured Warp Pins & Auto-Synced Map-to-Map Access Header
+**Goal:** Allow Warp/Transition pins to point to a real target `Map + Cell` coordinate, and display on each Map Grid which other maps can be accessed from this map (`Outgoing`) and which maps lead into this map (`Incoming`).
+
+### Step 5A — Structured Target Fields on `PinMarker`
+- Add optional fields to `PinMarker` (shown when editing a `warp_door` pin or any pin):
+  - `targetMapId?: string` (select target Map tab, or same map for intra-map teleports/passages).
+  - `targetCellId?: string` (select target Cell coordinate, e.g. `$A$8`).
+  - `isBidirectionalWarp?: boolean` (2-way door/portal vs. 1-way drop/warp).
+- **Benefits:**
+  - Clicking the Warp Pin offers a 1-click **"Jump to Destination Room (`AcB $A$8`)"** button.
+  - Because it stores `targetCellId` (UUID), if rows/columns are inserted on the target map and `$A$8` shifts to `$B$8`, the warp pin's displayed coordinate updates automatically!
+
+### Step 5B — Map-Level "Leads To / Entered From" Connections Bar
+- At the top of `MacroMapGrid.tsx`, display a compact bar showing:
+  - **Can Access (`Leads To`):** All other maps reachable from this map.
+  - **Accessed From (`Entered From`):** All other maps that have a warp/door leading into this map.
+- **Zero-Bloat Auto-Sync:** Derived automatically in real time from all pins across the database that have `targetMapId` set (plus an optional `manualConnectedMapIds?: string[]` on `MapPage` if you want to note a map connection before placing a specific pin). Clicking any pill in this bar jumps straight to that transition room!
+
+---
+
+## 6. Simple Cell-to-Cell Passage Indicators (Alternative to Freehand Arrows)
+**Goal:** Provide a fast, 1-click way to show that two cells have a path between them without needing to draw a vector arrow.
+- **Adjacent Cell Border Toggles:** Clicking the gap between two adjacent cells (`Top/Bottom/Left/Right` neighbor) cycles between `None` -> `Open Passage (<->)` -> `One-Way Drop/Gate (->)` -> `Locked/Sealed`.
+- **Non-Adjacent Cell Link:** Handled automatically by **Step 5A** (setting a pin's `targetCellId` to another cell on the same map).
+
+---
+
+## 7. Automated Unit & Integration Test Suite
 - Add **Vitest** + **`fake-indexeddb`** to test:
   - Coordinate math (`colIndexToLetter`, `letterToColIndex`, `formatCellCoord`, `parseCellCoord`).
   - Atomic 4-edge grid expansion/shrinking (`expandMapGrid` / `shrinkMapGrid` on `'top'`, `'left'`, `'bottom'`, `'right'`) and verifying that linked `CommentEntry.cellCoord` values update accurately when cells shift.
