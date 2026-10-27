@@ -24,7 +24,7 @@ An Excel `.xlsx` file is actually a standard ZIP archive containing:
    - Read each row (`Sheet`, `Cell` e.g. `$C$2`, `Room Name`, `Replies`, `Race/Tribe`).
    - Populate `GridCell.roomName` automatically from the `Room Name` column.
    - Classify each entry (`T:` -> `tablet`, `NPC` -> `npc`, `Sk:` -> `shortcut_hint`, `TODO:` -> `todo`, else `general`).
-   - Collect all unique values from the `Race/Tribe` column into `ProjectConfig.raceOrTribeOptions`.
+   - Create a Custom Dropdown Field (`CustomFieldDefinition`) named `"Race / Tribe"` (`type: 'select'`, `showInTable: true`, `filterable: true`) populated with the unique values from the Excel `Race/Tribe` column, and store each row's value in `comm.customFields[raceFieldId]`.
 4. **Output Portable `.zip`:**
    - Bundle `project-data.json` + `/images/*.webp` into `migrated-excel-backup.zip` ready for one-click import in the web app.
 
@@ -95,7 +95,23 @@ An Excel `.xlsx` file is actually a standard ZIP archive containing:
 
 ---
 
-## 7. Automated Unit & Integration Test Suite
+## 7. Replace Hardcoded "Race / Tribe" with Filterable Custom Dropdown Fields (100% Spoiler-Free)
+**Goal:** Even knowing that tablets belong to specific "Races / Tribes" is a mid-game mechanical spoiler. By replacing the hardcoded `raceOrTribe` property with the existing `CustomFieldDefinition` system, we eliminate spoilers AND make the codebase smaller and more flexible.
+
+### Why This Simplifies the Codebase (Zero Bloat)
+- **Remove Hardcoded `raceOrTribe`:** Remove `raceOrTribe` from `CommentEntry`, `raceOrTribeOptions` from `ProjectConfig`, and delete `RaceTribeSelector.tsx` as a standalone concept.
+- **Upgrade `'select'` Custom Fields:**
+  - `CustomFieldDefinition` already supports `type: 'text' | 'select'` and `options?: string[]`.
+  - Give `'select'`-type custom fields the ability to add new dropdown options inline on the fly (`+ Add Option...`) and optional badge color styling.
+  - Add `filterable: boolean` to `CustomFieldDefinition` (toggled via a checkbox when creating/editing a custom field in Settings).
+- **Dynamic Custom Field Filtering in `CommentsTableView.tsx` (~10 lines of code):**
+  - Store `customFieldFilters: Record<string, string>` (`{ [fieldId]: selectedValue }`).
+  - Render a filter `<select>` in the top filter bar for each custom field where `field.filterable === true`.
+  - In `filteredComments`, check that `comm.customFields?.[fieldId] === selectedValue`.
+
+---
+
+## 8. Automated Unit & Integration Test Suite
 - Add **Vitest** + **`fake-indexeddb`** to test:
   - Coordinate math (`colIndexToLetter`, `letterToColIndex`, `formatCellCoord`, `parseCellCoord`).
   - Atomic 4-edge grid expansion/shrinking (`expandMapGrid` / `shrinkMapGrid` on `'top'`, `'left'`, `'bottom'`, `'right'`) and verifying that linked `CommentEntry.cellCoord` values update accurately when cells shift.
