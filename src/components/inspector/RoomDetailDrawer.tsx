@@ -6,7 +6,7 @@
  * tags, and relational Comments / Tablets / NPC Dialogue / TODO entries.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   Maximize2,
@@ -20,6 +20,8 @@ import {
   Tag,
   MessageSquarePlus,
   Check,
+  Compass,
+  ExternalLink,
 } from 'lucide-react';
 import {
   CommentCategoryDefinition,
@@ -34,20 +36,33 @@ import {
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { AnnotatedRoomCanvas } from './AnnotatedRoomCanvas';
 import { CustomSelectDropdown } from '../comments/CustomSelectDropdown';
+import {
+  CommentCrossReferenceBadges,
+  CommentCrossReferenceEditor,
+} from '../comments/CommentCrossReferences';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
 interface RoomDetailDrawerProps {
   map: MapPage;
   cell: GridCell;
+  maps: MapPage[];
+  allCells: GridCell[];
+  allComments: CommentEntry[];
   roomComments: CommentEntry[];
   markerDefinitions: MarkerDefinition[];
   commentCategories: CommentCategoryDefinition[];
   roomFlagOptions: string[];
   customCommentFields: CustomFieldDefinition[];
+  initialHighlightedCommentId?: string | null;
   isFullModal: boolean;
   onToggleFullModal: () => void;
   onClose: () => void;
+  onJumpToRoom: (
+    mapId: string,
+    cellCoord: string,
+    highlightCommentId?: string
+  ) => void;
   onUpdateCellMetadata: (
     updates: Partial<Pick<GridCell, 'roomName' | 'isCompleted' | 'tags'>>
   ) => Promise<void>;
@@ -75,14 +90,19 @@ interface RoomDetailDrawerProps {
 export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   map,
   cell,
+  maps,
+  allCells,
+  allComments,
   roomComments,
   markerDefinitions,
   commentCategories,
   roomFlagOptions,
   customCommentFields,
+  initialHighlightedCommentId,
   isFullModal,
   onToggleFullModal,
   onClose,
+  onJumpToRoom,
   onUpdateCellMetadata,
   onUploadScreenshot,
   onAddPin,
@@ -110,6 +130,8 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   const [newSpeakerOrTitle, setNewSpeakerOrTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, string>>({});
+  const [newRelatedCommentIds, setNewRelatedCommentIds] = useState<string[]>([]);
+  const [newRelatedCellIds, setNewRelatedCellIds] = useState<string[]>([]);
 
   // Editing existing comment state
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -117,11 +139,57 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   const [editSpeaker, setEditSpeaker] = useState('');
   const [editContent, setEditContent] = useState('');
   const [editCustomFields, setEditCustomFields] = useState<Record<string, string>>({});
+  const [editRelatedCommentIds, setEditRelatedCommentIds] = useState<string[]>([]);
+  const [editRelatedCellIds, setEditRelatedCellIds] = useState<string[]>([]);
 
-  // Highlighted comment (when jumping from a linked pin)
+  // Highlighted comment (when jumping from a linked pin or cross-reference)
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(
     null
   );
+
+  useEffect(() => {
+    if (!initialHighlightedCommentId) return;
+    setHighlightedCommentId(initialHighlightedCommentId);
+    const timerScroll = setTimeout(() => {
+      const el = document.getElementById(
+        `comment-card-${initialHighlightedCommentId}`
+      );
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 60);
+    const timerClear = setTimeout(() => {
+      setHighlightedCommentId(null);
+    }, 2600);
+    return () => {
+      clearTimeout(timerScroll);
+      clearTimeout(timerClear);
+    };
+  }, [initialHighlightedCommentId, cell.id]);
+
+  // Incoming warps/connections from other rooms whose PinMarkers target this cell
+  const incomingWarps = useMemo(() => {
+    const mapLookup = new Map(maps.map((m) => [m.id, m]));
+    const list: {
+      originCell: GridCell;
+      originMap?: MapPage;
+      pin: PinMarker;
+    }[] = [];
+
+    for (const c of allCells) {
+      if (c.id === cell.id) continue;
+      for (const pin of c.markers) {
+        if (pin.targetCellId === cell.id) {
+          list.push({
+            originCell: c,
+            originMap: mapLookup.get(c.mapId),
+            pin,
+          });
+        }
+      }
+    }
+    return list;
+  }, [allCells, maps, cell.id]);
 
   // Sketch Modal target comment ID
   const [sketchTargetCommentId, setSketchTargetCommentId] = useState<string | null>(
@@ -171,6 +239,10 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       content: newContent.trim(),
       customFields:
         Object.keys(newCustomFields).length > 0 ? newCustomFields : undefined,
+      relatedCommentIds:
+        newRelatedCommentIds.length > 0 ? newRelatedCommentIds : undefined,
+      relatedCellIds:
+        newRelatedCellIds.length > 0 ? newRelatedCellIds : undefined,
       resolved: false,
       attachmentBlobIds: [],
     });
@@ -178,6 +250,8 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
     setNewSpeakerOrTitle('');
     setNewContent('');
     setNewCustomFields({});
+    setNewRelatedCommentIds([]);
+    setNewRelatedCellIds([]);
   };
 
   const handleStartEditComment = (comm: CommentEntry) => {
@@ -186,6 +260,8 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
     setEditSpeaker(comm.speakerOrTitle || '');
     setEditContent(comm.content);
     setEditCustomFields(comm.customFields || {});
+    setEditRelatedCommentIds(comm.relatedCommentIds || []);
+    setEditRelatedCellIds(comm.relatedCellIds || []);
   };
 
   const handleSaveEditComment = async (commentId: string) => {
@@ -194,6 +270,8 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       speakerOrTitle: editSpeaker.trim() || undefined,
       content: editContent.trim(),
       customFields: editCustomFields,
+      relatedCommentIds: editRelatedCommentIds,
+      relatedCellIds: editRelatedCellIds,
     });
     setEditingCommentId(null);
   };
@@ -271,6 +349,9 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
         <div className={isFullModal ? 'lg:col-span-7 flex flex-col gap-4' : 'flex flex-col gap-4'}>
           <AnnotatedRoomCanvas
             cell={cell}
+            maps={maps}
+            allCells={allCells}
+            allComments={allComments}
             markerDefinitions={markerDefinitions}
             roomComments={roomComments}
             onAddPin={onAddPin}
@@ -288,7 +369,47 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
               }
               setTimeout(() => setHighlightedCommentId(null), 2500);
             }}
+            onJumpToRoom={onJumpToRoom}
           />
+
+          {/* Incoming Warps / Connections to This Room (from other cells' pins) */}
+          {incomingWarps.length > 0 && (
+            <div className="bg-slate-900/80 border border-cyan-500/30 rounded-lg p-3 flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-cyan-300 mr-1">
+                <Compass size={13} className="text-cyan-400" />
+                <span>Incoming Warps / Connections ({incomingWarps.length}):</span>
+              </span>
+
+              {incomingWarps.map(({ originCell, originMap, pin }) => (
+                <button
+                  key={`inc-warp-${originCell.id}-${pin.id}`}
+                  type="button"
+                  onClick={() =>
+                    onJumpToRoom(originCell.mapId, originCell.coord)
+                  }
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/35 text-xs font-medium transition-colors"
+                  title={`Jump to origin room ${
+                    originMap?.codePrefix || ''
+                  } ${originCell.coord}${
+                    originCell.roomName ? ` (${originCell.roomName})` : ''
+                  }`}
+                >
+                  <span className="font-mono font-bold text-amber-300">
+                    {originMap?.codePrefix || '?'} {originCell.coord}
+                  </span>
+                  {originCell.roomName && (
+                    <span className="truncate max-w-[140px]">
+                      {originCell.roomName}
+                    </span>
+                  )}
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-950/70 text-cyan-300 border border-cyan-500/20">
+                    {pin.isBidirectionalWarp !== false ? '⇄ Warp' : '→ One-Way'}
+                  </span>
+                  <ExternalLink size={11} />
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Room Feature Flags / Tags (Spoiler-Free Editable) */}
           <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center gap-1.5">
@@ -479,6 +600,17 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                             ))}
                           </div>
                         )}
+                        <CommentCrossReferenceEditor
+                          currentCommentId={comm.id}
+                          relatedCommentIds={editRelatedCommentIds}
+                          relatedCellIds={editRelatedCellIds}
+                          maps={maps}
+                          cells={allCells}
+                          allComments={allComments}
+                          commentCategories={commentCategories}
+                          onChangeRelatedComments={setEditRelatedCommentIds}
+                          onChangeRelatedCells={setEditRelatedCellIds}
+                        />
                         <div className="flex items-center justify-end gap-2 pt-1">
                           <button
                             type="button"
@@ -634,6 +766,16 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                           </div>
                         )}
 
+                      {/* Outgoing Cross-References & Automatic Incoming Backlinks */}
+                      <CommentCrossReferenceBadges
+                        comment={comm}
+                        maps={maps}
+                        cells={allCells}
+                        allComments={allComments}
+                        commentCategories={commentCategories}
+                        onJumpToRoom={onJumpToRoom}
+                      />
+
                       {/* Attached Images / Sketches */}
                       {comm.attachmentBlobIds.length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -750,6 +892,17 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                 ))}
               </div>
             )}
+
+            <CommentCrossReferenceEditor
+              relatedCommentIds={newRelatedCommentIds}
+              relatedCellIds={newRelatedCellIds}
+              maps={maps}
+              cells={allCells}
+              allComments={allComments}
+              commentCategories={commentCategories}
+              onChangeRelatedComments={setNewRelatedCommentIds}
+              onChangeRelatedCells={setNewRelatedCellIds}
+            />
 
             <div className="flex items-center justify-end">
               <button

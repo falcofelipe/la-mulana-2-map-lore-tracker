@@ -34,6 +34,10 @@ import { normalizeCellCoord } from '../../utils/coordinates';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { CustomSelectDropdown } from './CustomSelectDropdown';
+import {
+  CommentCrossReferenceBadges,
+  CommentCrossReferenceEditor,
+} from './CommentCrossReferences';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
 /**
@@ -84,7 +88,11 @@ interface CommentsTableViewProps {
   comments: CommentEntry[];
   commentCategories: CommentCategoryDefinition[];
   customCommentFields: CustomFieldDefinition[];
-  onJumpToRoom: (mapId: string, cellCoord: string) => void;
+  onJumpToRoom: (
+    mapId: string,
+    cellCoord: string,
+    highlightCommentId?: string
+  ) => void;
   onCreateComment: (
     input: Omit<CommentEntry, 'id' | 'createdAt' | 'updatedAt'>
   ) => Promise<CommentEntry>;
@@ -133,8 +141,12 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   const [addCustomFields, setAddCustomFields] = useState<Record<string, string>>(
     {}
   );
+  const [addRelatedCommentIds, setAddRelatedCommentIds] = useState<string[]>(
+    []
+  );
+  const [addRelatedCellIds, setAddRelatedCellIds] = useState<string[]>([]);
 
-  // Full Row Edit State (Milestone B.3)
+  // Full Row Edit State (Milestone B.3 + C.3)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editMapId, setEditMapId] = useState('');
   const [editCoord, setEditCoord] = useState('');
@@ -144,6 +156,10 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   const [editCustomFields, setEditCustomFields] = useState<
     Record<string, string>
   >({});
+  const [editRelatedCommentIds, setEditRelatedCommentIds] = useState<string[]>(
+    []
+  );
+  const [editRelatedCellIds, setEditRelatedCellIds] = useState<string[]>([]);
 
   // Sketch Modal Target
   const [sketchTargetCommentId, setSketchTargetCommentId] = useState<
@@ -275,6 +291,10 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       content: addContent.trim(),
       customFields:
         Object.keys(addCustomFields).length > 0 ? addCustomFields : undefined,
+      relatedCommentIds:
+        addRelatedCommentIds.length > 0 ? addRelatedCommentIds : undefined,
+      relatedCellIds:
+        addRelatedCellIds.length > 0 ? addRelatedCellIds : undefined,
       resolved: false,
       attachmentBlobIds: [],
     });
@@ -282,6 +302,8 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     setAddSpeaker('');
     setAddContent('');
     setAddCustomFields({});
+    setAddRelatedCommentIds([]);
+    setAddRelatedCellIds([]);
     setIsAddingRow(false);
   };
 
@@ -293,6 +315,8 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     setEditSpeaker(comm.speakerOrTitle || '');
     setEditContent(comm.content);
     setEditCustomFields({ ...(comm.customFields || {}) });
+    setEditRelatedCommentIds(comm.relatedCommentIds || []);
+    setEditRelatedCellIds(comm.relatedCellIds || []);
   };
 
   const handleSaveRowEdit = async (commentId: string) => {
@@ -306,6 +330,8 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       speakerOrTitle: editSpeaker.trim() || undefined,
       content: editContent.trim(),
       customFields: editCustomFields,
+      relatedCommentIds: editRelatedCommentIds,
+      relatedCellIds: editRelatedCellIds,
     });
     setEditingCommentId(null);
   };
@@ -552,6 +578,17 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
             </div>
           )}
 
+          <CommentCrossReferenceEditor
+            relatedCommentIds={addRelatedCommentIds}
+            relatedCellIds={addRelatedCellIds}
+            maps={maps}
+            cells={cells}
+            allComments={comments}
+            commentCategories={commentCategories}
+            onChangeRelatedComments={setAddRelatedCommentIds}
+            onChangeRelatedCells={setAddRelatedCellIds}
+          />
+
           <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5">
             <textarea
               rows={2}
@@ -756,6 +793,18 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                               ))}
                             </div>
                           )}
+
+                          <CommentCrossReferenceEditor
+                            currentCommentId={comm.id}
+                            relatedCommentIds={editRelatedCommentIds}
+                            relatedCellIds={editRelatedCellIds}
+                            maps={maps}
+                            cells={cells}
+                            allComments={comments}
+                            commentCategories={commentCategories}
+                            onChangeRelatedComments={setEditRelatedCommentIds}
+                            onChangeRelatedCells={setEditRelatedCellIds}
+                          />
                         </div>
                       </td>
 
@@ -866,13 +915,15 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       )}
                     </td>
 
-                    {/* Cell Coordinate (Jump Button) */}
+                      {/* Cell Coordinate (Jump Button) */}
                     <td className="py-3 px-3 align-top">
                       <button
                         type="button"
-                        onClick={() => onJumpToRoom(comm.mapId, comm.cellCoord)}
+                        onClick={() =>
+                          onJumpToRoom(comm.mapId, comm.cellCoord, comm.id)
+                        }
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 font-mono font-bold text-xs transition-colors"
-                        title="Jump to this room on the Map Grid"
+                        title="Jump to this room on the Map Grid and highlight this entry"
                       >
                         <span>{comm.cellCoord}</span>
                         <ExternalLink size={10} />
@@ -902,19 +953,29 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       </span>
                     </td>
 
-                    {/* Speaker/Header + Highlighted Content */}
+                    {/* Speaker/Header + Highlighted Content + Cross-Reference Badges */}
                     <td className="py-3 px-4 align-top">
-                      {comm.speakerOrTitle && (
-                        <div className="font-bold text-slate-100 mb-0.5">
-                          {comm.speakerOrTitle}
+                      <div className="flex flex-col gap-1">
+                        {comm.speakerOrTitle && (
+                          <div className="font-bold text-slate-100">
+                            {comm.speakerOrTitle}
+                          </div>
+                        )}
+                        <div
+                          className={`text-slate-300 whitespace-pre-wrap leading-relaxed ${
+                            comm.resolved ? 'line-through' : ''
+                          }`}
+                        >
+                          {renderHighlightedLoreText(comm.content)}
                         </div>
-                      )}
-                      <div
-                        className={`text-slate-300 whitespace-pre-wrap leading-relaxed ${
-                          comm.resolved ? 'line-through' : ''
-                        }`}
-                      >
-                        {renderHighlightedLoreText(comm.content)}
+                        <CommentCrossReferenceBadges
+                          comment={comm}
+                          maps={maps}
+                          cells={cells}
+                          allComments={comments}
+                          commentCategories={commentCategories}
+                          onJumpToRoom={onJumpToRoom}
+                        />
                       </div>
                     </td>
 

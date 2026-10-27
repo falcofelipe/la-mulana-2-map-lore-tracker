@@ -6,7 +6,7 @@
  * the 2-click / multi-point SVG Vector Arrow tool.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   MousePointer,
   MapPin,
@@ -17,10 +17,15 @@ import {
   ImagePlus,
   Check,
   X,
+  Search,
+  ExternalLink,
+  Compass,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CommentEntry,
   GridCell,
+  MapPage,
   MarkerDefinition,
   PinMarker,
   VectorArrow,
@@ -42,6 +47,9 @@ const ARROW_COLOR_SWATCHES = [
 
 interface AnnotatedRoomCanvasProps {
   cell: GridCell;
+  maps: MapPage[];
+  allCells: GridCell[];
+  allComments: CommentEntry[];
   markerDefinitions: MarkerDefinition[];
   roomComments: CommentEntry[];
   onAddPin: (pin: Omit<PinMarker, 'id'>) => Promise<PinMarker>;
@@ -52,10 +60,18 @@ interface AnnotatedRoomCanvasProps {
   onDeleteArrow: (arrowId: string) => Promise<void>;
   onUploadScreenshot: (file: Blob) => Promise<void>;
   onJumpToComment?: (commentId: string) => void;
+  onJumpToRoom?: (
+    mapId: string,
+    cellCoord: string,
+    highlightCommentId?: string
+  ) => void;
 }
 
 export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
   cell,
+  maps,
+  allCells,
+  allComments,
   markerDefinitions,
   roomComments,
   onAddPin,
@@ -66,6 +82,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
   onDeleteArrow,
   onUploadScreenshot,
   onJumpToComment,
+  onJumpToRoom,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -97,6 +114,20 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
   const [arrowBidirectional, setArrowBidirectional] = useState(false);
   const [arrowLabel, setArrowLabel] = useState('');
 
+  // Cross-room comment search state inside the Pin Editor
+  const [isSearchingAllComments, setIsSearchingAllComments] = useState(false);
+  const [commentSearchQuery, setCommentSearchQuery] = useState('');
+
+  const mapById = useMemo(
+    () => new Map(maps.map((m) => [m.id, m])),
+    [maps]
+  );
+
+  const cellById = useMemo(
+    () => new Map(allCells.map((c) => [c.id, c])),
+    [allCells]
+  );
+
   const markerDefsMap = new Map<string, MarkerDefinition>(
     markerDefinitions.map((d) => [d.id, d])
   );
@@ -105,6 +136,53 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
 
   const selectedPin = cell.markers.find((m) => m.id === selectedPinId) || null;
   const selectedArrow = cell.arrows.find((a) => a.id === selectedArrowId) || null;
+
+  const linkedCommentObj = useMemo(() => {
+    if (!selectedPin?.linkedCommentId) return null;
+    return (
+      allComments.find((c) => c.id === selectedPin.linkedCommentId) || null
+    );
+  }, [selectedPin?.linkedCommentId, allComments]);
+
+  const targetCellObj = useMemo(() => {
+    if (!selectedPin?.targetCellId) return null;
+    return cellById.get(selectedPin.targetCellId) || null;
+  }, [selectedPin?.targetCellId, cellById]);
+
+  const targetMapObj = useMemo(() => {
+    const mapId = targetCellObj?.mapId || selectedPin?.targetMapId;
+    if (!mapId) return null;
+    return mapById.get(mapId) || null;
+  }, [targetCellObj, selectedPin?.targetMapId, mapById]);
+
+  const targetMapSelectableCells = useMemo(() => {
+    const mapId = selectedPin?.targetMapId;
+    if (!mapId) return [];
+    const list = allCells.filter(
+      (c) => c.mapId === mapId && c.state !== 'blocked_x'
+    );
+    return [...list].sort((a, b) => {
+      const aActive = a.state === 'room' || Boolean(a.roomName.trim()) ? 0 : 1;
+      const bActive = b.state === 'room' || Boolean(b.roomName.trim()) ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      if (a.row !== b.row) return a.row - b.row;
+      return a.col - b.col;
+    });
+  }, [allCells, selectedPin?.targetMapId]);
+
+  const matchingAllComments = useMemo(() => {
+    const q = commentSearchQuery.trim().toLowerCase();
+    return allComments
+      .filter((c) => {
+        if (!q) return true;
+        const m = mapById.get(c.mapId);
+        const hay = `${m?.codePrefix || ''} ${m?.name || ''} ${c.cellCoord} ${
+          c.speakerOrTitle || ''
+        } ${c.content}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 20);
+  }, [allComments, commentSearchQuery, mapById]);
 
   // Listen for the `Delete` key when a Pin or Vector Arrow is selected
   useEffect(() => {
@@ -675,10 +753,28 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
               />
             </div>
 
+            {/* Cross-Room / Cross-Map Comment Linker */}
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">
-                Link to Room Comment / Tablet Entry
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] text-slate-400">
+                  Link to Comment / Tablet (This Room or Any Map)
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsSearchingAllComments(!isSearchingAllComments)
+                  }
+                  className="inline-flex items-center gap-1 text-[10px] text-amber-300 hover:text-amber-200 font-medium"
+                >
+                  <Search size={10} />
+                  <span>
+                    {isSearchingAllComments
+                      ? 'Hide Global Search'
+                      : 'Search All Maps...'}
+                  </span>
+                </button>
+              </div>
+
               <div className="flex items-center gap-1.5">
                 <select
                   value={selectedPin.linkedCommentId || ''}
@@ -689,23 +785,291 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                   }
                   className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
                 >
-                  <option value="">— Not linked to a specific comment —</option>
-                  {roomComments.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      [{c.category.toUpperCase()}]{' '}
-                      {c.speakerOrTitle || c.content.slice(0, 40)}
+                  <option value="">— Not linked to a comment —</option>
+                  {roomComments.length > 0 && (
+                    <optgroup label={`Current Room (${cell.coord})`}>
+                      {roomComments.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          [{c.category.toUpperCase()}]{' '}
+                          {c.speakerOrTitle || c.content.slice(0, 40)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {linkedCommentObj &&
+                    !roomComments.some((rc) => rc.id === linkedCommentObj.id) && (
+                      <optgroup label="Linked Cross-Room Entry">
+                        <option value={linkedCommentObj.id}>
+                          [{mapById.get(linkedCommentObj.mapId)?.codePrefix || '?'}{' '}
+                          {linkedCommentObj.cellCoord}] [
+                          {linkedCommentObj.category.toUpperCase()}]{' '}
+                          {linkedCommentObj.speakerOrTitle ||
+                            linkedCommentObj.content.slice(0, 36)}
+                        </option>
+                      </optgroup>
+                    )}
+                </select>
+
+                {linkedCommentObj && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isSameRoom =
+                        linkedCommentObj.mapId === cell.mapId &&
+                        linkedCommentObj.cellCoord === cell.coord;
+                      if (isSameRoom && onJumpToComment) {
+                        onJumpToComment(linkedCommentObj.id);
+                      } else if (onJumpToRoom) {
+                        onJumpToRoom(
+                          linkedCommentObj.mapId,
+                          linkedCommentObj.cellCoord,
+                          linkedCommentObj.id
+                        );
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 flex items-center gap-1 shrink-0 font-semibold"
+                    title={
+                      linkedCommentObj.mapId === cell.mapId &&
+                      linkedCommentObj.cellCoord === cell.coord
+                        ? 'Scroll to & highlight linked comment in this room'
+                        : `Jump to ${
+                            mapById.get(linkedCommentObj.mapId)?.codePrefix || ''
+                          } ${linkedCommentObj.cellCoord} and highlight comment`
+                    }
+                  >
+                    <LinkIcon size={12} />
+                    <span>
+                      {linkedCommentObj.mapId === cell.mapId &&
+                      linkedCommentObj.cellCoord === cell.coord
+                        ? 'View'
+                        : `Jump (${
+                            mapById.get(linkedCommentObj.mapId)?.codePrefix || ''
+                          } ${linkedCommentObj.cellCoord})`}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Global Comment Search Popover */}
+              {isSearchingAllComments && (
+                <div className="mt-2 bg-slate-950 border border-amber-500/50 rounded-lg p-2 flex flex-col gap-1.5">
+                  <div className="relative">
+                    <Search
+                      size={12}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      type="text"
+                      value={commentSearchQuery}
+                      onChange={(e) => setCommentSearchQuery(e.target.value)}
+                      placeholder="Search any tablet, NPC quote, or coordinate across all maps..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded pl-7 pr-2 py-1 text-[11px] text-slate-100 focus:outline-none focus:border-amber-400"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-32 overflow-y-auto divide-y divide-slate-800/70">
+                    {matchingAllComments.length === 0 ? (
+                      <div className="p-2 text-center text-[11px] text-slate-500">
+                        No matching comments found.
+                      </div>
+                    ) : (
+                      matchingAllComments.map((c) => {
+                        const m = mapById.get(c.mapId);
+                        const isSelected = c.id === selectedPin.linkedCommentId;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              onUpdatePin(selectedPin.id, {
+                                linkedCommentId: c.id,
+                              });
+                              setIsSearchingAllComments(false);
+                            }}
+                            className={`w-full px-2 py-1 text-left hover:bg-slate-800 flex items-center justify-between gap-2 text-[11px] ${
+                              isSelected ? 'bg-blue-500/15 text-blue-200' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="px-1 py-0.2 rounded bg-slate-800 text-amber-300 font-mono font-bold text-[10px] shrink-0">
+                                {m?.codePrefix || '?'} {c.cellCoord}
+                              </span>
+                              <span className="font-bold text-blue-300 uppercase text-[10px] shrink-0">
+                                [{c.category.toUpperCase()}]
+                              </span>
+                              <span className="truncate text-slate-200">
+                                {c.speakerOrTitle
+                                  ? `${c.speakerOrTitle}: ${c.content}`
+                                  : c.content}
+                              </span>
+                            </div>
+                            <span className="text-amber-300 font-semibold shrink-0">
+                              {isSelected ? '✓ Linked' : 'Select'}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Target Room / Warp Destination Linker (Milestone C.1) */}
+          <div className="pt-2 border-t border-slate-800/80 flex flex-col gap-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
+                <Compass size={13} className="text-cyan-400" />
+                <span>
+                  Target Room / Warp Destination Link (Optional — Auto-syncs if grid shifts)
+                </span>
+              </span>
+
+              {targetCellObj && targetMapObj && onJumpToRoom && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onJumpToRoom(targetCellObj.mapId, targetCellObj.coord)
+                  }
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/40 font-bold text-xs transition-colors"
+                  title="Jump directly to the target room"
+                >
+                  <span>
+                    Jump to {targetMapObj.codePrefix} {targetCellObj.coord}
+                    {targetCellObj.roomName
+                      ? ` (${targetCellObj.roomName})`
+                      : ''}
+                  </span>
+                  <ExternalLink size={11} />
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-center">
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-0.5">
+                  Target Map
+                </label>
+                <select
+                  value={selectedPin.targetMapId || ''}
+                  onChange={(e) => {
+                    const nextMapId = e.target.value || undefined;
+                    onUpdatePin(selectedPin.id, {
+                      targetMapId: nextMapId,
+                      targetCellId: undefined,
+                    });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
+                >
+                  <option value="">— No Target Map —</option>
+                  {maps.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.codePrefix} — {m.name}
                     </option>
                   ))}
                 </select>
-                {selectedPin.linkedCommentId && onJumpToComment && (
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-0.5">
+                  Target Cell Coordinate
+                </label>
+                <select
+                  value={selectedPin.targetCellId || ''}
+                  disabled={!selectedPin.targetMapId}
+                  onChange={(e) => {
+                    const nextCellId = e.target.value || undefined;
+                    const pickedCell = nextCellId
+                      ? cellById.get(nextCellId)
+                      : undefined;
+                    const pickedMap = pickedCell
+                      ? mapById.get(pickedCell.mapId)
+                      : undefined;
+
+                    const updates: Partial<PinMarker> = {
+                      targetCellId: nextCellId,
+                    };
+
+                    // Auto-fill shortLabel if currently empty or default '?'
+                    if (
+                      pickedCell &&
+                      pickedMap &&
+                      (!selectedPin.shortLabel ||
+                        selectedPin.shortLabel === '?')
+                    ) {
+                      const arrowPrefix = selectedPin.isBidirectionalWarp
+                        ? '<->'
+                        : '->';
+                      updates.shortLabel = `${arrowPrefix} ${pickedMap.codePrefix} ${pickedCell.coord}`;
+                    }
+                    onUpdatePin(selectedPin.id, updates);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100 disabled:opacity-50"
+                >
+                  <option value="">
+                    {selectedPin.targetMapId
+                      ? '— Select Target Cell —'
+                      : '— Select a Map first —'}
+                  </option>
+                  {targetMapSelectableCells.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.coord}
+                      {c.roomName ? ` — ${c.roomName}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-3">
+                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedPin.isBidirectionalWarp)}
+                    onChange={(e) => {
+                      const nextBi = e.target.checked;
+                      const updates: Partial<PinMarker> = {
+                        isBidirectionalWarp: nextBi,
+                      };
+                      if (selectedPin.shortLabel) {
+                        if (nextBi && selectedPin.shortLabel.startsWith('-> ')) {
+                          updates.shortLabel = selectedPin.shortLabel.replace(
+                            /^-> /,
+                            '<-> '
+                          );
+                        } else if (
+                          !nextBi &&
+                          selectedPin.shortLabel.startsWith('<-> ')
+                        ) {
+                          updates.shortLabel = selectedPin.shortLabel.replace(
+                            /^<-> /,
+                            '-> '
+                          );
+                        }
+                      }
+                      onUpdatePin(selectedPin.id, updates);
+                    }}
+                    className="accent-cyan-400"
+                  />
+                  <span>2-Way Warp (&lt;-&gt;)</span>
+                </label>
+
+                {targetCellObj && targetMapObj && (
                   <button
                     type="button"
-                    onClick={() => onJumpToComment(selectedPin.linkedCommentId!)}
-                    className="px-2 py-1.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 flex items-center gap-1 shrink-0"
-                    title="Highlight linked comment"
+                    onClick={() => {
+                      const prefix = selectedPin.isBidirectionalWarp
+                        ? '<->'
+                        : '->';
+                      onUpdatePin(selectedPin.id, {
+                        shortLabel: `${prefix} ${targetMapObj.codePrefix} ${targetCellObj.coord}`,
+                      });
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-[11px]"
+                    title="Set Pin Badge Label to target Map + Cell coordinate"
                   >
-                    <LinkIcon size={12} />
-                    <span>View</span>
+                    <RefreshCw size={10} />
+                    <span>Sync Label</span>
                   </button>
                 )}
               </div>

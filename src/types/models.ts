@@ -94,7 +94,10 @@ export interface PinMarker {
   color: string;            // Hex color override
   shortLabel?: string;      // Rendered next to pin if present (e.g. "?", "Raijin / Fujin", "-> AcB $A$8")
   notes?: string;           // Detailed tooltip/inspector note
-  linkedCommentId?: string; // Optional direct link to a CommentEntry.id
+  linkedCommentId?: string; // Optional direct link to a CommentEntry.id (in this room or any room/map)
+  targetMapId?: string;     // Optional target MapPage.id (for warps, transitions, or cross-room gates)
+  targetCellId?: string;    // Optional stable target GridCell.id (survives row/col coordinate shifts)
+  isBidirectionalWarp?: boolean; // Optional flag indicating a 2-way warp/connection
   resolved: boolean;        // Dims or checks off marker once completed/solved
 }
 
@@ -157,6 +160,8 @@ export interface CommentEntry {
   speakerOrTitle?: string;  // e.g., "NPC Thor (after Mjolnir)", "T2: The Alfr Seeress' Prophecy P1"
   content: string;          // Full transcript, riddle text, or TODO details
   customFields?: Record<string, string>; // Values for user-defined CustomFieldDefinitions (text or select)
+  relatedCommentIds?: string[]; // Cross-references to other CommentEntry.id items (tablets, NPCs, TODOs)
+  relatedCellIds?: string[];    // Cross-references to other GridCell.id rooms
   resolved: boolean;        // Completion flag (primarily for 'todo' entries)
   attachmentBlobIds: string[]; // Attached tablet symbol crops or freehand sketches
   createdAt: number;

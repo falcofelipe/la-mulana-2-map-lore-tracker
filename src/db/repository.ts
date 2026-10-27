@@ -136,6 +136,46 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
 }
 
 /**
+ * Helper to update `shortLabel` on any pin across the entire database that
+ * points via `targetCellId` to a cell whose coordinate shifted (e.g., `-> AcB $A$8` -> `-> AcB $B$8`).
+ */
+async function syncShiftedTargetPinLabels(
+  shiftedCells: Map<string, { oldCoord: string; newCoord: string }>,
+  now: number
+): Promise<void> {
+  if (shiftedCells.size === 0) return;
+  const allCells = await db.cells.toArray();
+  const cellsWithUpdatedPins: GridCell[] = [];
+
+  for (const cell of allCells) {
+    if (cell.markers.length === 0) continue;
+    let changed = false;
+    const nextMarkers = cell.markers.map((pin) => {
+      if (!pin.targetCellId || !pin.shortLabel) return pin;
+      const shift = shiftedCells.get(pin.targetCellId);
+      if (!shift || !pin.shortLabel.includes(shift.oldCoord)) return pin;
+      changed = true;
+      return {
+        ...pin,
+        shortLabel: pin.shortLabel.replace(shift.oldCoord, shift.newCoord),
+      };
+    });
+
+    if (changed) {
+      cellsWithUpdatedPins.push({
+        ...cell,
+        markers: nextMarkers,
+        updatedAt: now,
+      });
+    }
+  }
+
+  if (cellsWithUpdatedPins.length > 0) {
+    await db.cells.bulkPut(cellsWithUpdatedPins);
+  }
+}
+
+/**
  * Expands a map's grid by adding 1 row or column on the specified edge:
  * - 'bottom' / 'right': Appends new empty cells without shifting existing coordinates.
  * - 'top' / 'left': Shifts existing cells by +1 row or +1 col, recalculates their
@@ -158,6 +198,10 @@ export async function expandMapGrid(
 
     const updatedCells: GridCell[] = [];
     const cellCoordMap = new Map<string, string>(); // cellId -> newCoord
+    const shiftedCoordPairs = new Map<
+      string,
+      { oldCoord: string; newCoord: string }
+    >();
 
     if (direction === 'top' || direction === 'left') {
       const rowDelta = direction === 'top' ? 1 : 0;
@@ -168,6 +212,10 @@ export async function expandMapGrid(
         const nextCol = cell.col + colDelta;
         const nextCoord = formatCellCoord(nextRow, nextCol);
         cellCoordMap.set(cell.id, nextCoord);
+        shiftedCoordPairs.set(cell.id, {
+          oldCoord: cell.coord,
+          newCoord: nextCoord,
+        });
         updatedCells.push({
           ...cell,
           row: nextRow,
@@ -212,6 +260,7 @@ export async function expandMapGrid(
       }
 
       await db.cells.bulkPut(updatedCells);
+      await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
 
       // Update any comments linked to shifted cells
       const updatedComments: CommentEntry[] = [];
@@ -329,7 +378,20 @@ export async function shrinkMapGrid(
 
     await db.cells.bulkDelete(Array.from(removedIds));
     if (direction === 'top' || direction === 'left') {
+      const oldCoordById = new Map(existingCells.map((c) => [c.id, c.coord]));
+      const shiftedCoordPairs = new Map<
+        string,
+        { oldCoord: string; newCoord: string }
+      >();
+      for (const kept of cellsToKeep) {
+        const oldCoord = oldCoordById.get(kept.id);
+        if (oldCoord && oldCoord !== kept.coord) {
+          shiftedCoordPairs.set(kept.id, { oldCoord, newCoord: kept.coord });
+        }
+      }
+
       await db.cells.bulkPut(cellsToKeep);
+      await syncShiftedTargetPinLabels(shiftedCoordPairs, now);
       const coordMap = new Map(cellsToKeep.map((c) => [c.id, c.coord]));
       const updatedComments: CommentEntry[] = [];
       for (const comm of mapComments) {

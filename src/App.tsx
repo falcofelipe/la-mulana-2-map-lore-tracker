@@ -63,6 +63,9 @@ export const App: React.FC = () => {
   const [activeMapId, setActiveMapId] = useState<string>('');
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
   const [inspectedCellId, setInspectedCellId] = useState<string | null>(null);
+  const [pendingHighlightCommentId, setPendingHighlightCommentId] = useState<
+    string | null
+  >(null);
   const [isInspectorFullModal, setIsInspectorFullModal] = useState(false);
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
 
@@ -202,8 +205,12 @@ export const App: React.FC = () => {
     };
   }, [activeView, selectedCellId, inspectedCellId, isGlobalSearchOpen]);
 
-  // Jump from Comments Table or Global Search directly to a Map + Cell
-  const handleJumpToRoom = (mapId: string, cellCoord: string) => {
+  // Jump from Comments Table, Cross-Reference, Warp Pin, or Global Search directly to a Map + Cell
+  const handleJumpToRoom = (
+    mapId: string,
+    cellCoord: string,
+    highlightCommentId?: string
+  ) => {
     setActiveMapId(mapId);
     setActiveView('map');
     const targetCell = allCells.find(
@@ -212,6 +219,7 @@ export const App: React.FC = () => {
     if (targetCell) {
       setSelectedCellId(targetCell.id);
       setInspectedCellId(targetCell.id);
+      setPendingHighlightCommentId(highlightCommentId || null);
     }
   };
 
@@ -301,16 +309,24 @@ export const App: React.FC = () => {
               <RoomDetailDrawer
                 map={inspectedCellMap}
                 cell={inspectedCell}
+                maps={maps}
+                allCells={allCells}
+                allComments={allComments}
                 roomComments={inspectedRoomComments}
                 markerDefinitions={config.markerDefinitions}
                 commentCategories={config.commentCategories}
                 roomFlagOptions={config.roomFlagOptions || []}
                 customCommentFields={config.customCommentFields}
+                initialHighlightedCommentId={pendingHighlightCommentId}
                 isFullModal={isInspectorFullModal}
                 onToggleFullModal={() =>
                   setIsInspectorFullModal((prev) => !prev)
                 }
-                onClose={() => setInspectedCellId(null)}
+                onClose={() => {
+                  setInspectedCellId(null);
+                  setPendingHighlightCommentId(null);
+                }}
+                onJumpToRoom={handleJumpToRoom}
                 onUpdateCellMetadata={(updates) =>
                   updateCellMetadata(inspectedCell.id, updates)
                 }
