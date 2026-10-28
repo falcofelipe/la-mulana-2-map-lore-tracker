@@ -90,3 +90,10 @@ src/
     ├── sketches/               # SketchesBoardView, SketchCanvasModal
     └── settings/               # SettingsAndCustomizeView
 ```
+
+---
+
+## 📄 License
+
+Distributed under the **BSD 3-Clause License**. See [`LICENSE`](./LICENSE) for full terms.
+
