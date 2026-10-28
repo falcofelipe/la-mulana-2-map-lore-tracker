@@ -15,6 +15,10 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { CommentEntry, GridCell, MapPage } from '../../types/models';
+import {
+  renderHighlightedLoreText,
+  stripLoreColorTags,
+} from '../../utils/textHighlight';
 
 interface GlobalSearchModalProps {
   maps: MapPage[];
@@ -121,18 +125,22 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       }
     }
 
-    // 3. Search Comments, Tablets, NPCs, TODOs
+    // 3. Search Comments, Tablets, NPCs, TODOs, & Global Notes
     for (const comm of comments) {
+      const isGlobal = comm.mapId === 'global';
       const mapObj = mapById.get(comm.mapId);
-      if (!mapObj) continue;
+      if (!isGlobal && !mapObj) continue;
       const cellObj = cellByMapAndCoord.get(`${comm.mapId}::${comm.cellCoord}`);
+      const mapPrefix = isGlobal ? 'GLOBAL' : mapObj!.codePrefix;
+      const mapName = isGlobal ? 'General Notes' : mapObj!.name;
 
       const customValsList = comm.customFields
         ? Object.values(comm.customFields).filter(Boolean)
         : [];
-      const commHaystack = `${mapObj.codePrefix} ${comm.cellCoord} ${
+      const plainContent = stripLoreColorTags(comm.content);
+      const commHaystack = `${mapPrefix} ${mapName} ${comm.cellCoord} ${
         cellObj?.roomName || ''
-      } ${comm.speakerOrTitle || ''} ${comm.content} ${customValsList.join(
+      } ${comm.speakerOrTitle || ''} ${comm.content} ${plainContent} ${customValsList.join(
         ' '
       )}`.toLowerCase();
 
@@ -141,13 +149,13 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           id: `comm-${comm.id}`,
           kind: 'comment',
           mapId: comm.mapId,
-          mapPrefix: mapObj.codePrefix,
-          mapName: mapObj.name,
+          mapPrefix,
+          mapName,
           cellCoord: comm.cellCoord,
           title:
             comm.speakerOrTitle ||
             `${comm.category.toUpperCase()} in ${
-              cellObj?.roomName || comm.cellCoord
+              isGlobal ? 'General Notes' : cellObj?.roomName || comm.cellCoord
             }`,
           subtitle: comm.content,
           badge:
@@ -239,7 +247,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                       )}
                     </div>
                     <p className="text-xs text-slate-400 line-clamp-2 mt-1">
-                      {item.subtitle}
+                      {item.kind === 'comment'
+                        ? renderHighlightedLoreText(item.subtitle)
+                        : item.subtitle}
                     </p>
                   </div>
                 </div>
