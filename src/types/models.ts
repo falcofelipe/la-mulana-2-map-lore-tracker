@@ -67,6 +67,58 @@ export interface CustomFieldDefinition {
 }
 
 /**
+ * Target destination for the upper-right Child / Race attribution text
+ * (e.g., "6th Child: Lokapala") when scanning a tablet screenshot.
+ */
+export type TabletHeaderTargetMode =
+  | 'custom_field'     // Assigns to `targetCustomFieldId` (and auto-adds option if select)
+  | 'speaker_or_title' // Places in `speakerOrTitle` field
+  | 'append_content'   // Appends `\n\n[6th Child: Lokapala]` at the end of content
+  | 'ignore';          // Strips/ignores the upper-right header
+
+/**
+ * Global settings for the automatic Tablet Screenshot OCR & Drawing Scanner.
+ */
+export interface TabletScannerConfig {
+  headerTargetMode: TabletHeaderTargetMode;
+  targetCustomFieldId?: string;        // Used when headerTargetMode === 'custom_field'
+  autoHighlightColoredText: boolean;   // Wrap green/red/cyan/yellow tablet words in color tags
+  autoKeepAttachmentOnDrawing: boolean;// Auto-check "Keep image as attachment" when a cyan drawing is detected
+}
+
+/**
+ * Normalized bounding rectangle (0..1 relative to captured frame width & height)
+ * used for cropping room screenshots or tablet captures automatically.
+ */
+export interface NormalizedBoundingRect {
+  x: number;      // 0..1 from left
+  y: number;      // 0..1 from top
+  width: number;  // 0..1 fraction of frame width
+  height: number; // 0..1 fraction of frame height
+}
+
+/**
+ * Configuration for seamless in-game Room & Tablet screenshot capture
+ * across Electron (global hotkeys + window capture) and Web (live stream,
+ * gamepad combos, and Steam screenshot folder watching).
+ */
+export interface SeamlessCaptureConfig {
+  enabled: boolean;
+  roomHotkey: string;                  // Electron globalShortcut accelerator, e.g. 'Alt+1' or 'CommandOrControl+Shift+R'
+  tabletHotkey: string;                // Electron globalShortcut accelerator, e.g. 'Alt+2' or 'CommandOrControl+Shift+T'
+  roomGamepadCombo: string;            // e.g. 'Select+R1', 'L3+R3', or '' to disable
+  tabletGamepadCombo: string;          // e.g. 'Select+L1' or '' to disable
+  roomCropRect?: NormalizedBoundingRect | null;   // Calibrated on first Room capture or in Settings
+  tabletCropRect?: NormalizedBoundingRect | null; // Calibrated on first Tablet capture or in Settings
+  promptCalibrationOnFirstCapture: boolean;       // Open interactive bounding-box selector if rect is unset
+  tabletQuickSaveMode: 'auto_save' | 'open_drawer'; // 'auto_save' immediately creates the tablet comment in the selected room
+  playSoundOnCapture: boolean;         // Subtle Web Audio confirmation chime on background capture
+  preferredWindowTitle: string;        // e.g. 'La-Mulana 2' (for Electron desktopCapturer window matching)
+  steamWatchFolderPath?: string;       // Optional custom folder path for Electron native folder watcher
+  autoClassifyWatchedScreenshots: boolean; // Auto-detect Scan Mode tablet vs Room screenshot when watching a folder
+}
+
+/**
  * Global project settings and customizable definitions stored in IndexedDB.
  */
 export interface ProjectConfig {
@@ -80,6 +132,8 @@ export interface ProjectConfig {
    */
   roomFlagOptions: string[];
   customCommentFields: CustomFieldDefinition[];
+  tabletScannerConfig?: TabletScannerConfig;
+  seamlessCaptureConfig?: SeamlessCaptureConfig;
   updatedAt: number;
 }
 
@@ -111,6 +165,7 @@ export interface VectorArrow {
   color: string;            // Hex color (e.g. '#06b6d4' cyan, '#22c55e' green, '#f97316' orange)
   bidirectional: boolean;
   dashed: boolean;
+  hasArrowhead?: boolean;   // Defaults to true; when false, renders a plain solid/dashed vector line without arrowheads
   label?: string;
 }
 

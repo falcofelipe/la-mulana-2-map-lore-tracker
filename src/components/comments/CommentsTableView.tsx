@@ -29,15 +29,27 @@ import {
   CustomFieldDefinition,
   GridCell,
   MapPage,
+  TabletScannerConfig,
 } from '../../types/models';
 import { normalizeCellCoord } from '../../utils/coordinates';
-import { renderHighlightedLoreText } from '../../utils/textHighlight';
+import {
+  renderHighlightedLoreText,
+  stripLoreColorTags,
+} from '../../utils/textHighlight';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { CustomSelectDropdown } from './CustomSelectDropdown';
 import {
   CommentCrossReferenceBadges,
   CommentCrossReferenceEditor,
 } from './CommentCrossReferences';
+import {
+  ScannedAttachmentState,
+  TabletScreenshotScannerBar,
+} from './TabletScreenshotScannerBar';
+import {
+  extractImageBlobFromPasteEvent,
+  readImageBlobFromClipboard,
+} from '../../utils/clipboardImage';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
 /**
@@ -88,6 +100,7 @@ interface CommentsTableViewProps {
   comments: CommentEntry[];
   commentCategories: CommentCategoryDefinition[];
   customCommentFields: CustomFieldDefinition[];
+  tabletScannerConfig?: TabletScannerConfig;
   onJumpToRoom: (
     mapId: string,
     cellCoord: string,
@@ -112,6 +125,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
   comments,
   commentCategories,
   customCommentFields,
+  tabletScannerConfig,
   onJumpToRoom,
   onCreateComment,
   onUpdateComment,
@@ -131,8 +145,8 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
 
   // Quick Add Row State
   const [isAddingRow, setIsAddingRow] = useState(false);
-  const [addMapId, setAddMapId] = useState(maps[0]?.id || '');
-  const [addCoord, setAddCoord] = useState('$C$2');
+  const [addMapId, setAddMapId] = useState(maps[0]?.id || 'global');
+  const [addCoord, setAddCoord] = useState('C2');
   const [addCategory, setAddCategory] = useState(
     commentCategories[0]?.id || 'tablet'
   );
@@ -145,6 +159,12 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     []
   );
   const [addRelatedCellIds, setAddRelatedCellIds] = useState<string[]>([]);
+  const [pendingAddScan, setPendingAddScan] =
+    useState<ScannedAttachmentState | null>(null);
+  const [pastedAddFile, setPastedAddFile] = useState<{
+    blob: Blob;
+    timestamp: number;
+  } | null>(null);
 
   // Full Row Edit State (Milestone B.3 + C.3)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -160,6 +180,12 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     []
   );
   const [editRelatedCellIds, setEditRelatedCellIds] = useState<string[]>([]);
+  const [pendingEditScan, setPendingEditScan] =
+    useState<ScannedAttachmentState | null>(null);
+  const [pastedEditFile, setPastedEditFile] = useState<{
+    blob: Blob;
+    timestamp: number;
+  } | null>(null);
 
   // Sketch Modal Target
   const [sketchTargetCommentId, setSketchTargetCommentId] = useState<
@@ -236,22 +262,26 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       }
 
       if (q) {
+        const isGlobal = comm.mapId === 'global';
         const mapObj = mapById.get(comm.mapId);
         const cellObj = cellByMapAndCoord.get(
           `${comm.mapId}::${comm.cellCoord}`
         );
-        const roomName = cellObj?.roomName || '';
+        const roomName = isGlobal
+          ? 'General Notes Global Floating'
+          : cellObj?.roomName || '';
         const customVals = comm.customFields
           ? Object.values(comm.customFields).join(' ')
           : '';
 
         const haystack = [
-          mapObj?.codePrefix,
-          mapObj?.name,
+          isGlobal ? 'GLOBAL' : mapObj?.codePrefix,
+          isGlobal ? 'General Notes' : mapObj?.name,
           comm.cellCoord,
           roomName,
           comm.speakerOrTitle,
           comm.content,
+          stripLoreColorTags(comm.content),
           customVals,
         ]
           .filter(Boolean)
@@ -276,14 +306,19 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
 
   const handleQuickAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addContent.trim() && !addSpeaker.trim()) return;
+    if (
+      !addContent.trim() &&
+      !addSpeaker.trim() &&
+      !(pendingAddScan && pendingAddScan.keepAttachment)
+    ) {
+      return;
+    }
 
-    const targetMapId = addMapId || maps[0]?.id;
-    if (!targetMapId) return;
+    const targetMapId = addMapId || maps[0]?.id || 'global';
+    const isGlobal = targetMapId === 'global';
+    const cleanCoord = isGlobal ? '' : normalizeCellCoord(addCoord);
 
-    const cleanCoord = normalizeCellCoord(addCoord);
-
-    await onCreateComment({
+    const created = await onCreateComment({
       mapId: targetMapId,
       cellCoord: cleanCoord,
       category: addCategory,
@@ -299,11 +334,16 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       attachmentBlobIds: [],
     });
 
+    if (pendingAddScan && pendingAddScan.keepAttachment) {
+      await onAttachImageToComment(created.id, pendingAddScan.blob);
+    }
+
     setAddSpeaker('');
     setAddContent('');
     setAddCustomFields({});
     setAddRelatedCommentIds([]);
     setAddRelatedCellIds([]);
+    setPendingAddScan(null);
     setIsAddingRow(false);
   };
 
@@ -317,11 +357,13 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
     setEditCustomFields({ ...(comm.customFields || {}) });
     setEditRelatedCommentIds(comm.relatedCommentIds || []);
     setEditRelatedCellIds(comm.relatedCellIds || []);
+    setPendingEditScan(null);
   };
 
   const handleSaveRowEdit = async (commentId: string) => {
-    const cleanCoord = normalizeCellCoord(editCoord);
-    if (!editMapId || !cleanCoord) return;
+    const isGlobal = editMapId === 'global';
+    const cleanCoord = isGlobal ? '' : normalizeCellCoord(editCoord);
+    if (!editMapId || (!isGlobal && !cleanCoord)) return;
 
     await onUpdateComment(commentId, {
       mapId: editMapId,
@@ -333,6 +375,10 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       relatedCommentIds: editRelatedCommentIds,
       relatedCellIds: editRelatedCellIds,
     });
+    if (pendingEditScan && pendingEditScan.keepAttachment) {
+      await onAttachImageToComment(commentId, pendingEditScan.blob);
+    }
+    setPendingEditScan(null);
     setEditingCommentId(null);
   };
 
@@ -372,7 +418,8 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
               onChange={(e) => setFilterMapId(e.target.value)}
               className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
             >
-              <option value="ALL">All Maps ({maps.length})</option>
+              <option value="ALL">All Maps &amp; General Notes ({maps.length})</option>
+              <option value="global">Global — General Notes (Floating)</option>
               {maps.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.codePrefix} — {m.name}
@@ -473,8 +520,60 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
       {isAddingRow && (
         <form
           onSubmit={handleQuickAddSubmit}
+          data-comment-scanner-form="true"
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type.startsWith('image/')) {
+                const blob = items[i].getAsFile();
+                if (blob) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPastedAddFile({
+                    blob,
+                    timestamp: Date.now(),
+                  });
+                  return;
+                }
+              }
+            }
+          }}
           className="bg-slate-900 border border-amber-500/50 rounded-xl p-4 flex flex-col gap-3 shrink-0 shadow-xl"
         >
+          <TabletScreenshotScannerBar
+            scannerConfig={tabletScannerConfig}
+            customCommentFields={customCommentFields}
+            pendingScan={pendingAddScan}
+            onChangePendingScan={setPendingAddScan}
+            externalPasteFile={pastedAddFile}
+            onAddCustomFieldOption={onAddCustomFieldOption}
+            onApplyParsedData={(parsed) => {
+              let nextText = parsed.transcript;
+              if (parsed.appendedHeaderNote) {
+                nextText = nextText
+                  ? `${nextText}\n\n${parsed.appendedHeaderNote}`
+                  : parsed.appendedHeaderNote;
+              }
+              if (nextText) {
+                setAddContent((prev) =>
+                  prev.trim() ? `${prev.trim()}\n${nextText}` : nextText
+                );
+              }
+              if (parsed.routedSpeakerOrTitle) {
+                setAddSpeaker((prev) =>
+                  prev.trim() || parsed.routedSpeakerOrTitle!
+                );
+              }
+              if (parsed.routedCustomField) {
+                const { fieldId, value } = parsed.routedCustomField;
+                setAddCustomFields((prev) => ({
+                  ...prev,
+                  [fieldId]: value,
+                }));
+              }
+            }}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
@@ -485,6 +584,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                 onChange={(e) => setAddMapId(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
               >
+                <option value="global">Global — General Notes (No Map)</option>
                 {maps.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.codePrefix} — {m.name}
@@ -499,10 +599,11 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
               </label>
               <input
                 type="text"
-                value={addCoord}
+                disabled={addMapId === 'global'}
+                value={addMapId === 'global' ? '—' : addCoord}
                 onChange={(e) => setAddCoord(e.target.value)}
-                placeholder="e.g. $C$2"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 font-mono text-amber-300"
+                placeholder="e.g. C2"
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 font-mono text-amber-300 disabled:opacity-40"
               />
             </div>
 
@@ -672,6 +773,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                           onChange={(e) => setEditMapId(e.target.value)}
                           className="w-full bg-slate-950 border border-amber-500/60 rounded px-2 py-1.5 text-xs text-slate-100 focus:outline-none"
                         >
+                          <option value="global">Global — General Notes</option>
                           {maps.map((m) => (
                             <option key={m.id} value={m.id}>
                               {m.codePrefix} — {m.name}
@@ -685,10 +787,11 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                         <input
                           type="text"
                           list={`cell-coords-${comm.id}`}
-                          value={editCoord}
+                          disabled={editMapId === 'global'}
+                          value={editMapId === 'global' ? '—' : editCoord}
                           onChange={(e) => setEditCoord(e.target.value)}
-                          placeholder="$C$2"
-                          className="w-20 bg-slate-950 border border-amber-500/60 rounded px-2 py-1.5 font-mono font-bold text-xs text-amber-300 focus:outline-none"
+                          placeholder="C2"
+                          className="w-20 bg-slate-950 border border-amber-500/60 rounded px-2 py-1.5 font-mono font-bold text-xs text-amber-300 focus:outline-none disabled:opacity-40"
                         />
                         <datalist id={`cell-coords-${comm.id}`}>
                           {editMapCells.map((c) => (
@@ -701,7 +804,11 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
 
                       {/* Live Resolved Room Name Preview */}
                       <td className="py-3 px-3.5 align-top">
-                        {previewCellObj ? (
+                        {editMapId === 'global' ? (
+                          <span className="text-[11px] text-cyan-300 font-medium">
+                            Floating / General Note (No Map)
+                          </span>
+                        ) : previewCellObj ? (
                           <div className="flex flex-col gap-0.5">
                             <span className="font-medium text-slate-200">
                               {previewCellObj.roomName || (
@@ -737,8 +844,66 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       </td>
 
                       {/* Edit Speaker + Content (+ any non-column custom fields) */}
-                      <td className="py-3 px-4 align-top">
+                      <td
+                        className="py-3 px-4 align-top"
+                        data-comment-scanner-form="true"
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.startsWith('image/')) {
+                              const blob = items[i].getAsFile();
+                              if (blob) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setPastedEditFile({
+                                  blob,
+                                  timestamp: Date.now(),
+                                });
+                                return;
+                              }
+                            }
+                          }
+                        }}
+                      >
                         <div className="flex flex-col gap-2">
+                          <TabletScreenshotScannerBar
+                            compact
+                            scannerConfig={tabletScannerConfig}
+                            customCommentFields={customCommentFields}
+                            pendingScan={pendingEditScan}
+                            onChangePendingScan={setPendingEditScan}
+                            externalPasteFile={pastedEditFile}
+                            onAddCustomFieldOption={onAddCustomFieldOption}
+                            onApplyParsedData={(parsed) => {
+                              let nextText = parsed.transcript;
+                              if (parsed.appendedHeaderNote) {
+                                nextText = nextText
+                                  ? `${nextText}\n\n${parsed.appendedHeaderNote}`
+                                  : parsed.appendedHeaderNote;
+                              }
+                              if (nextText) {
+                                setEditContent((prev) =>
+                                  prev.trim()
+                                    ? `${prev.trim()}\n${nextText}`
+                                    : nextText
+                                );
+                              }
+                              if (parsed.routedSpeakerOrTitle) {
+                                setEditSpeaker((prev) =>
+                                  prev.trim() || parsed.routedSpeakerOrTitle!
+                                );
+                              }
+                              if (parsed.routedCustomField) {
+                                const { fieldId, value } =
+                                  parsed.routedCustomField;
+                                setEditCustomFields((prev) => ({
+                                  ...prev,
+                                  [fieldId]: value,
+                                }));
+                              }
+                            }}
+                          />
                           <input
                             type="text"
                             value={editSpeaker}
@@ -895,13 +1060,32 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                 return (
                   <tr
                     key={comm.id}
-                    className={`hover:bg-slate-800/40 transition-colors ${
+                    tabIndex={0}
+                    data-comment-scanner-form="true"
+                    onPaste={async (e) => {
+                      const blob = extractImageBlobFromPasteEvent(e);
+                      if (blob) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        await onAttachImageToComment(comm.id, blob);
+                      }
+                    }}
+                    className={`hover:bg-slate-800/40 focus:bg-slate-800/60 focus:outline-none transition-colors ${
                       comm.resolved ? 'opacity-60' : ''
                     }`}
                   >
                     {/* Sheet / Map */}
                     <td className="py-3 px-3.5 align-top">
-                      {mapObj ? (
+                      {comm.mapId === 'global' ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono font-bold text-[10px]">
+                            GLOBAL
+                          </span>
+                          <span className="text-slate-300 font-medium truncate max-w-[120px]">
+                            General Notes
+                          </span>
+                        </div>
+                      ) : mapObj ? (
                         <div className="flex items-center gap-1.5">
                           <span className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-mono font-bold text-[11px]">
                             {mapObj.codePrefix}
@@ -915,27 +1099,39 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                       )}
                     </td>
 
-                      {/* Cell Coordinate (Jump Button) */}
+                    {/* Cell Coordinate (Jump Button) */}
                     <td className="py-3 px-3 align-top">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onJumpToRoom(comm.mapId, comm.cellCoord, comm.id)
-                        }
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 font-mono font-bold text-xs transition-colors"
-                        title="Jump to this room on the Map Grid and highlight this entry"
-                      >
-                        <span>{comm.cellCoord}</span>
-                        <ExternalLink size={10} />
-                      </button>
+                      {comm.mapId === 'global' || !comm.cellCoord ? (
+                        <span className="text-slate-500 font-mono text-xs px-2">
+                          —
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onJumpToRoom(comm.mapId, comm.cellCoord, comm.id)
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 font-mono font-bold text-xs transition-colors"
+                          title="Jump to this room on the Map Grid and highlight this entry"
+                        >
+                          <span>{comm.cellCoord}</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      )}
                     </td>
 
                     {/* Auto-Resolved Room Name */}
                     <td className="py-3 px-3.5 align-top font-medium text-slate-200">
-                      {cellObj?.roomName || (
-                        <span className="text-slate-600 italic">
-                          Unnamed Room
+                      {comm.mapId === 'global' ? (
+                        <span className="text-cyan-400/80 text-[11px] italic">
+                          Floating Note
                         </span>
+                      ) : (
+                        cellObj?.roomName || (
+                          <span className="text-slate-600 italic">
+                            Unnamed Room
+                          </span>
+                        )
                       )}
                     </td>
 
@@ -1030,22 +1226,29 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
                             }
                           />
                         ))}
-                        <label
-                          title="Upload image attachment"
-                          className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-800 cursor-pointer"
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const blob = await readImageBlobFromClipboard();
+                              if (blob) {
+                                await onAttachImageToComment(comm.id, blob);
+                              } else {
+                                window.alert(
+                                  'No image found in clipboard. Copy a screenshot first, then click here (or click this row and press Ctrl+V)!'
+                                );
+                              }
+                            } catch {
+                              window.alert(
+                                'Click this row and press Ctrl+V to paste an image attachment from your clipboard.'
+                              );
+                            }
+                          }}
+                          title="Paste image attachment from clipboard (or click row and press Ctrl+V)"
+                          className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-800"
                         >
                           <ImagePlus size={12} />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) onAttachImageToComment(comm.id, file);
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
+                        </button>
                         <button
                           type="button"
                           onClick={() => setSketchTargetCommentId(comm.id)}

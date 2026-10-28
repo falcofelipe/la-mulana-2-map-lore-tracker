@@ -14,6 +14,7 @@ import {
   Upload,
   RotateCcw,
   MapPin,
+  MessageSquare,
   Tag,
   Columns,
   Plus,
@@ -22,17 +23,23 @@ import {
   Check,
   Edit3,
   X,
+  ScanText,
 } from 'lucide-react';
 import {
+  CommentCategoryDefinition,
   CustomFieldDefinition,
   MarkerDefinition,
   MarkerIconKey,
   ProjectConfig,
+  SeamlessCaptureConfig,
+  TabletScannerConfig,
 } from '../../types/models';
+import { DEFAULT_TABLET_SCANNER_CONFIG } from '../../config/defaultDefinitions';
 import {
   AVAILABLE_MARKER_ICONS,
   MarkerIcon,
 } from '../common/MarkerIcon';
+import { SeamlessCaptureSettingsSection } from './SeamlessCaptureSettingsSection';
 
 interface SettingsAndCustomizeViewProps {
   config: ProjectConfig;
@@ -45,6 +52,7 @@ interface SettingsAndCustomizeViewProps {
   };
   onUpdateProjectTitle: (title: string) => Promise<void>;
   onSaveMarkerDefinitions: (defs: MarkerDefinition[]) => Promise<void>;
+  onSaveCommentCategories: (cats: CommentCategoryDefinition[]) => Promise<void>;
   onUpdateRoomFlagOptions: (
     nextOptions: string[],
     renamedOrDeleted?: { oldName: string; newName: string }
@@ -55,6 +63,38 @@ interface SettingsAndCustomizeViewProps {
     nextOptions: string[],
     renamedOrDeleted?: { oldName: string; newName: string }
   ) => Promise<void>;
+  onSaveTabletScannerConfig: (
+    scannerConfig: TabletScannerConfig
+  ) => Promise<void>;
+  onSaveSeamlessCaptureConfig: (
+    seamlessConfig: SeamlessCaptureConfig
+  ) => Promise<void>;
+  seamlessCaptureRuntime: {
+    isElectron: boolean;
+    electronStatus: {
+      roomRegistered: boolean;
+      tabletRegistered: boolean;
+      watchingSteamFolder: boolean;
+      steamFolderPath?: string;
+      error?: string;
+    };
+    isWebStreamConnected: boolean;
+    webStreamLabel: string | null;
+    onConnectWebStream: () => Promise<void>;
+    onDisconnectWebStream: () => void;
+    isWebFolderWatching: boolean;
+    watchedFolderName: string | null;
+    onStartWebFolderWatch: () => Promise<void>;
+    onStopWebFolderWatch: () => void;
+    onToggleElectronSteamWatch: (
+      enable: boolean,
+      customPath?: string
+    ) => Promise<void>;
+    onOpenCalibratorWithSample: (
+      mode: 'room' | 'tablet',
+      sampleBlob?: Blob
+    ) => Promise<void>;
+  };
   onExportZip: () => Promise<void>;
   onImportZip: (file: File) => Promise<void>;
   onResetToBlank: () => Promise<void>;
@@ -67,20 +107,43 @@ export const SettingsAndCustomizeView: React.FC<
   storageStats,
   onUpdateProjectTitle,
   onSaveMarkerDefinitions,
+  onSaveCommentCategories,
   onUpdateRoomFlagOptions,
   onSaveCustomCommentFields,
   onUpdateCustomFieldOptions,
+  onSaveTabletScannerConfig,
+  onSaveSeamlessCaptureConfig,
+  seamlessCaptureRuntime,
   onExportZip,
   onImportZip,
   onResetToBlank,
 }) => {
-  // 1. Custom Marker creation state
+  // 1. Custom Marker creation & inline editing state
   const [newMarkerName, setNewMarkerName] = useState('');
   const [newMarkerDesc, setNewMarkerDesc] = useState('');
   const [newMarkerIcon, setNewMarkerIcon] = useState<MarkerIconKey>('star');
   const [newMarkerColor, setNewMarkerColor] = useState('#eab308');
   const [newMarkerSymbol, setNewMarkerSymbol] = useState('');
   const [newMarkerShowOnMacro, setNewMarkerShowOnMacro] = useState(true);
+
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  const [editMarkerName, setEditMarkerName] = useState('');
+  const [editMarkerDesc, setEditMarkerDesc] = useState('');
+  const [editMarkerIcon, setEditMarkerIcon] = useState<MarkerIconKey>('star');
+  const [editMarkerSymbol, setEditMarkerSymbol] = useState('');
+  const [editMarkerColor, setEditMarkerColor] = useState('#eab308');
+
+  // 1b. Comment Categories creation & inline editing state
+  const [newCatCode, setNewCatCode] = useState('');
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatColor, setNewCatColor] = useState('#06b6d4');
+  const [newCatSupportsResolved, setNewCatSupportsResolved] = useState(false);
+
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editCatCode, setEditCatCode] = useState('');
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatColor, setEditCatColor] = useState('#06b6d4');
+  const [editCatSupportsResolved, setEditCatSupportsResolved] = useState(false);
 
   // 2. Room Flags manager state
   const [newRoomFlagName, setNewRoomFlagName] = useState('');
@@ -150,9 +213,107 @@ export const SettingsAndCustomizeView: React.FC<
     await onSaveMarkerDefinitions(next);
   };
 
-  const handleDeleteMarkerDef = async (markerId: string) => {
+  const handleDeleteMarkerDef = async (markerId: string, markerName: string) => {
+    if (
+      !window.confirm(
+        `Delete marker category "${markerName}"?\n\nAny existing pins of this type on your maps will be converted into red "BROKEN" markers so you can easily spot and reassign or delete them.`
+      )
+    ) {
+      return;
+    }
     const next = config.markerDefinitions.filter((m) => m.id !== markerId);
     await onSaveMarkerDefinitions(next);
+  };
+
+  const handleStartEditMarker = (def: MarkerDefinition) => {
+    setEditingMarkerId(def.id);
+    setEditMarkerName(def.name);
+    setEditMarkerDesc(def.description || '');
+    setEditMarkerIcon(def.iconKey);
+    setEditMarkerSymbol(def.defaultSymbol || '');
+    setEditMarkerColor(def.defaultColor);
+  };
+
+  const handleSaveEditMarker = async (markerId: string) => {
+    if (!editMarkerName.trim()) return;
+    const next = config.markerDefinitions.map((m) =>
+      m.id === markerId
+        ? {
+            ...m,
+            name: editMarkerName.trim(),
+            description: editMarkerDesc.trim(),
+            iconKey: editMarkerIcon,
+            defaultSymbol: editMarkerSymbol.trim() || undefined,
+            defaultColor: editMarkerColor,
+          }
+        : m
+    );
+    await onSaveMarkerDefinitions(next);
+    setEditingMarkerId(null);
+  };
+
+  // Comment Category handlers
+  const handleAddCommentCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = newCatCode.trim();
+    const name = newCatName.trim();
+    if (!code || !name) return;
+
+    const newCat: CommentCategoryDefinition = {
+      id: `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      code,
+      name,
+      badgeColor: newCatColor,
+      supportsResolved: newCatSupportsResolved,
+    };
+    await onSaveCommentCategories([...config.commentCategories, newCat]);
+    setNewCatCode('');
+    setNewCatName('');
+    setNewCatSupportsResolved(false);
+  };
+
+  const handleStartEditCat = (cat: CommentCategoryDefinition) => {
+    setEditingCatId(cat.id);
+    setEditCatCode(cat.code);
+    setEditCatName(cat.name);
+    setEditCatColor(cat.badgeColor);
+    setEditCatSupportsResolved(Boolean(cat.supportsResolved));
+  };
+
+  const handleSaveEditCat = async (catId: string) => {
+    if (!editCatCode.trim() || !editCatName.trim()) return;
+    const next = config.commentCategories.map((c) =>
+      c.id === catId
+        ? {
+            ...c,
+            code: editCatCode.trim(),
+            name: editCatName.trim(),
+            badgeColor: editCatColor,
+            supportsResolved: editCatSupportsResolved,
+          }
+        : c
+    );
+    await onSaveCommentCategories(next);
+    setEditingCatId(null);
+  };
+
+  const handleDeleteCommentCategory = async (
+    catId: string,
+    catName: string
+  ) => {
+    if (config.commentCategories.length <= 1) {
+      window.alert('At least one comment category must remain.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete comment category "${catName}"?\n\nAny existing comments using this category will be reassigned to "${config.commentCategories[0]?.name || 'General Note'}".`
+      )
+    ) {
+      return;
+    }
+    const next = config.commentCategories.filter((c) => c.id !== catId);
+    await onSaveCommentCategories(next);
   };
 
   // Room Flags handlers
@@ -385,6 +546,28 @@ export const SettingsAndCustomizeView: React.FC<
           </div>
         </div>
 
+        {/* SECTION 1B: SEAMLESS IN-GAME SCREENSHOT & TABLET CAPTURE */}
+        <SeamlessCaptureSettingsSection
+          seamlessConfig={config.seamlessCaptureConfig}
+          isElectron={seamlessCaptureRuntime.isElectron}
+          electronStatus={seamlessCaptureRuntime.electronStatus}
+          isWebStreamConnected={seamlessCaptureRuntime.isWebStreamConnected}
+          webStreamLabel={seamlessCaptureRuntime.webStreamLabel}
+          onConnectWebStream={seamlessCaptureRuntime.onConnectWebStream}
+          onDisconnectWebStream={seamlessCaptureRuntime.onDisconnectWebStream}
+          isWebFolderWatching={seamlessCaptureRuntime.isWebFolderWatching}
+          watchedFolderName={seamlessCaptureRuntime.watchedFolderName}
+          onStartWebFolderWatch={seamlessCaptureRuntime.onStartWebFolderWatch}
+          onStopWebFolderWatch={seamlessCaptureRuntime.onStopWebFolderWatch}
+          onToggleElectronSteamWatch={
+            seamlessCaptureRuntime.onToggleElectronSteamWatch
+          }
+          onOpenCalibratorWithSample={
+            seamlessCaptureRuntime.onOpenCalibratorWithSample
+          }
+          onSaveSeamlessConfig={onSaveSeamlessCaptureConfig}
+        />
+
         {/* SECTION 2: CUSTOM PIN MARKER TYPES MANAGER */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col gap-4">
           <div>
@@ -398,64 +581,161 @@ export const SettingsAndCustomizeView: React.FC<
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {config.markerDefinitions.map((def) => (
-              <div
-                key={def.id}
-                className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-3"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    style={{ backgroundColor: def.defaultColor }}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-slate-950 font-bold text-xs shrink-0 shadow"
-                  >
-                    {def.defaultSymbol ? (
-                      <span>{def.defaultSymbol}</span>
-                    ) : (
-                      <MarkerIcon iconKey={def.iconKey} size={15} />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-bold text-xs text-slate-100 truncate">
-                      {def.name}
-                    </div>
-                    <div className="text-[11px] text-slate-400 truncate">
-                      {def.description}
-                    </div>
-                  </div>
-                </div>
+            {config.markerDefinitions.map((def) => {
+              const isEditing = editingMarkerId === def.id;
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <input
-                    type="color"
-                    value={def.defaultColor}
-                    onChange={(e) =>
-                      handleUpdateMarkerColor(def.id, e.target.value)
-                    }
-                    title="Change Default Pin Color"
-                    className="w-7 h-7 rounded bg-slate-900 border border-slate-700 cursor-pointer"
-                  />
-                  <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer bg-slate-900 px-2 py-1 rounded border border-slate-800">
+              if (isEditing) {
+                return (
+                  <div
+                    key={def.id}
+                    className="bg-slate-950 border border-amber-500/60 rounded-lg p-3 flex flex-col gap-2.5 text-xs"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">
+                          Marker Name
+                        </label>
+                        <input
+                          type="text"
+                          value={editMarkerName}
+                          onChange={(e) => setEditMarkerName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">
+                          Description
+                        </label>
+                        <input
+                          type="text"
+                          value={editMarkerDesc}
+                          onChange={(e) => setEditMarkerDesc(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {AVAILABLE_MARKER_ICONS.map((ic) => (
+                          <button
+                            key={ic.key}
+                            type="button"
+                            onClick={() => setEditMarkerIcon(ic.key)}
+                            title={ic.label}
+                            className={`p-1.5 rounded border ${
+                              editMarkerIcon === ic.key
+                                ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            <MarkerIcon iconKey={ic.key} size={12} />
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          maxLength={3}
+                          value={editMarkerSymbol}
+                          onChange={(e) => setEditMarkerSymbol(e.target.value)}
+                          placeholder="Sym"
+                          title="Optional 1-3 char symbol override (leave empty to use Icon)"
+                          className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center font-mono text-slate-100"
+                        />
+                        <input
+                          type="color"
+                          value={editMarkerColor}
+                          onChange={(e) => setEditMarkerColor(e.target.value)}
+                          className="w-7 h-7 rounded bg-slate-900 border border-slate-700 cursor-pointer"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditMarker(def.id)}
+                          className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center gap-1"
+                        >
+                          <Check size={12} />
+                          <span>Save</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingMarkerId(null)}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={def.id}
+                  className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      style={{ backgroundColor: def.defaultColor }}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-slate-950 font-bold text-xs shrink-0 shadow"
+                    >
+                      {def.defaultSymbol ? (
+                        <span>{def.defaultSymbol}</span>
+                      ) : (
+                        <MarkerIcon iconKey={def.iconKey} size={15} />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-100 truncate">
+                        {def.name}
+                      </div>
+                      <div className="text-[11px] text-slate-400 truncate">
+                        {def.description}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <input
-                      type="checkbox"
-                      checked={def.showShortLabelOnMacro}
-                      onChange={() => handleToggleMarkerMacroVisibility(def.id)}
-                      className="accent-amber-400"
+                      type="color"
+                      value={def.defaultColor}
+                      onChange={(e) =>
+                        handleUpdateMarkerColor(def.id, e.target.value)
+                      }
+                      title="Change Default Pin Color"
+                      className="w-7 h-7 rounded bg-slate-900 border border-slate-700 cursor-pointer"
                     />
-                    <span>Macro Label</span>
-                  </label>
-                  {!def.isBuiltIn && (
+                    <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer bg-slate-900 px-2 py-1 rounded border border-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={def.showShortLabelOnMacro}
+                        onChange={() => handleToggleMarkerMacroVisibility(def.id)}
+                        className="accent-amber-400"
+                      />
+                      <span>Macro Label</span>
+                    </label>
                     <button
                       type="button"
-                      onClick={() => handleDeleteMarkerDef(def.id)}
+                      onClick={() => handleStartEditMarker(def)}
+                      className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border border-slate-800"
+                      title="Edit marker name, icon, or symbol"
+                    >
+                      <Edit3 size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMarkerDef(def.id, def.name)}
                       className="p-1.5 rounded bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800"
-                      title="Delete custom marker category"
+                      title="Delete marker category (converts instances to BROKEN)"
                     >
                       <Trash2 size={13} />
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Add New Marker Category Form */}
@@ -597,6 +877,201 @@ export const SettingsAndCustomizeView: React.FC<
                 </button>
               </div>
             </div>
+          </form>
+        </div>
+
+        {/* SECTION 2B: COMMENT CATEGORIES MANAGER */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col gap-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <MessageSquare size={18} className="text-amber-400" />
+              <span>Comment Categories Manager (Tablets, NPCs, Skeletons, TODOs)</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Edit category names (e.g. &ldquo;Sk: Skeleton&rdquo;), short badge codes, colors, and resolution toggles, or add/remove comment categories.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {config.commentCategories.map((cat) => {
+              const isEditing = editingCatId === cat.id;
+
+              if (isEditing) {
+                return (
+                  <div
+                    key={cat.id}
+                    className="bg-slate-950 border border-amber-500/60 rounded-lg p-3 flex flex-col gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={editCatCode}
+                        onChange={(e) => setEditCatCode(e.target.value)}
+                        placeholder="Code"
+                        className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center font-mono font-bold text-slate-100"
+                      />
+                      <input
+                        type="text"
+                        value={editCatName}
+                        onChange={(e) => setEditCatName(e.target.value)}
+                        placeholder="Category Name"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 font-semibold"
+                      />
+                      <input
+                        type="color"
+                        value={editCatColor}
+                        onChange={(e) => setEditCatColor(e.target.value)}
+                        className="w-7 h-7 rounded bg-slate-900 border border-slate-700 cursor-pointer shrink-0"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editCatSupportsResolved}
+                          onChange={(e) =>
+                            setEditCatSupportsResolved(e.target.checked)
+                          }
+                          className="accent-amber-400"
+                        />
+                        <span>Has Open/Done Status</span>
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditCat(cat.id)}
+                          className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center gap-1"
+                        >
+                          <Check size={12} />
+                          <span>Save</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCatId(null)}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={cat.id}
+                  className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      style={{
+                        backgroundColor: `${cat.badgeColor}22`,
+                        color: cat.badgeColor,
+                        borderColor: `${cat.badgeColor}55`,
+                      }}
+                      className="px-2 py-0.5 rounded border font-mono font-bold text-xs shrink-0"
+                    >
+                      {cat.code}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-100 truncate">
+                        {cat.name}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        {cat.supportsResolved
+                          ? 'Supports Open / Done status'
+                          : 'Lore / Note entry'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditCat(cat)}
+                      className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border border-slate-800"
+                      title="Edit category code, name, or color"
+                    >
+                      <Edit3 size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleDeleteCommentCategory(cat.id, cat.name)
+                      }
+                      className="p-1.5 rounded bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800"
+                      title="Delete comment category"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <form
+            onSubmit={handleAddCommentCategory}
+            className="bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-wrap items-end gap-3 text-xs"
+          >
+            <div className="w-24">
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Code Badge
+              </label>
+              <input
+                type="text"
+                maxLength={6}
+                value={newCatCode}
+                onChange={(e) => setNewCatCode(e.target.value)}
+                placeholder="e.g. Sk"
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 font-mono text-slate-100 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Category Name
+              </label>
+              <input
+                type="text"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="e.g. Skeleton / Hint / Journal"
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Badge Color
+              </label>
+              <input
+                type="color"
+                value={newCatColor}
+                onChange={(e) => setNewCatColor(e.target.value)}
+                className="w-10 h-8 rounded bg-slate-900 border border-slate-700 cursor-pointer"
+              />
+            </div>
+
+            <label className="flex items-center gap-1.5 py-2 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newCatSupportsResolved}
+                onChange={(e) => setNewCatSupportsResolved(e.target.checked)}
+                className="accent-amber-400"
+              />
+              <span>Supports Open/Done Checkbox</span>
+            </label>
+
+            <button
+              type="submit"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold shadow ml-auto"
+            >
+              <Plus size={14} />
+              <span>Add Comment Category</span>
+            </button>
           </form>
         </div>
 
@@ -1002,6 +1477,187 @@ export const SettingsAndCustomizeView: React.FC<
             )}
           </div>
         </div>
+
+        {/* SECTION 4: TABLET SCREENSHOT SCANNER (OCR, COLOR HIGHLIGHTING & CHILD ATTRIBUTION) */}
+        {(() => {
+          const scanner: TabletScannerConfig = {
+            ...DEFAULT_TABLET_SCANNER_CONFIG,
+            ...(config.tabletScannerConfig || {}),
+          };
+
+          const selectValue =
+            scanner.headerTargetMode === 'custom_field' &&
+            scanner.targetCustomFieldId
+              ? `custom_field:${scanner.targetCustomFieldId}`
+              : scanner.headerTargetMode;
+
+          const handleHeaderRoutingChange = async (val: string) => {
+            if (val.startsWith('custom_field:')) {
+              const fieldId = val.slice('custom_field:'.length);
+              await onSaveTabletScannerConfig({
+                ...scanner,
+                headerTargetMode: 'custom_field',
+                targetCustomFieldId: fieldId,
+              });
+            } else {
+              await onSaveTabletScannerConfig({
+                ...scanner,
+                headerTargetMode:
+                  val as TabletScannerConfig['headerTargetMode'],
+                targetCustomFieldId: undefined,
+              });
+            }
+          };
+
+          const handleQuickCreateChildField = async () => {
+            const newId = `cf-child-${Date.now()}`;
+            const newField: CustomFieldDefinition = {
+              id: newId,
+              name: 'Child / Race',
+              type: 'select',
+              options: [],
+              showInTable: true,
+              filterable: true,
+            };
+            await onSaveCustomCommentFields([
+              ...config.customCommentFields,
+              newField,
+            ]);
+            await onSaveTabletScannerConfig({
+              ...scanner,
+              headerTargetMode: 'custom_field',
+              targetCustomFieldId: newId,
+            });
+          };
+
+          return (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col gap-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <ScanText size={18} className="text-cyan-400" />
+                  <span>
+                    Tablet Screenshot Scanner (OCR, Colored Keywords &amp; Child
+                    Attribution)
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure how scanned tablet screenshots parse colored keywords (
+                  <code className="text-emerald-300">{'{g:green}'}</code>,{' '}
+                  <code className="text-rose-300">{'{r:red}'}</code>), detect
+                  tablet drawings, and route upper-right Child / Race headers
+                  (e.g. &ldquo;6th Child: Lokapala&rdquo;).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col gap-2">
+                  <label className="font-bold text-slate-200">
+                    Upper-Right Tablet Header Destination (e.g. &ldquo;6th Child:
+                    Lokapala&rdquo;)
+                  </label>
+                  <p className="text-[11px] text-slate-400">
+                    Choose where the small attribution text in the top-right
+                    corner of a tablet screenshot should be saved:
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <select
+                      value={selectValue}
+                      onChange={(e) => handleHeaderRoutingChange(e.target.value)}
+                      className="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="speaker_or_title">
+                        Speaker or Tablet Header Field (Default)
+                      </option>
+                      {config.customCommentFields.map((field) => (
+                        <option
+                          key={field.id}
+                          value={`custom_field:${field.id}`}
+                        >
+                          Custom Field: {field.name} ({field.type})
+                        </option>
+                      ))}
+                      <option value="append_content">
+                        Append as Note at End of Tablet Transcript
+                      </option>
+                      <option value="ignore">
+                        Ignore / Strip Header Text
+                      </option>
+                    </select>
+
+                    {config.customCommentFields.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={handleQuickCreateChildField}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 font-semibold"
+                        title="Create a filterable 'Child / Race' custom dropdown field and route tablet headers to it automatically"
+                      >
+                        <Plus size={13} />
+                        <span>Create &amp; Use &ldquo;Child / Race&rdquo; Field</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-center gap-3">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={scanner.autoHighlightColoredText}
+                      onChange={(e) =>
+                        onSaveTabletScannerConfig({
+                          ...scanner,
+                          autoHighlightColoredText: e.target.checked,
+                        })
+                      }
+                      className="mt-0.5 accent-cyan-400"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-200">
+                        Auto-Highlight Colored Tablet Keywords
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Detects green and red/coral words in the screenshot and
+                        wraps them in{' '}
+                        <code className="text-emerald-300">
+                          {'{g:golden key}'}
+                        </code>{' '}
+                        and{' '}
+                        <code className="text-rose-300">
+                          {'{r:Jormungand}'}
+                        </code>{' '}
+                        tags.
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={scanner.autoKeepAttachmentOnDrawing}
+                      onChange={(e) =>
+                        onSaveTabletScannerConfig({
+                          ...scanner,
+                          autoKeepAttachmentOnDrawing: e.target.checked,
+                        })
+                      }
+                      className="mt-0.5 accent-cyan-400"
+                    />
+                    <div>
+                      <div className="font-bold text-slate-200">
+                        Auto-Select &ldquo;Keep Picture as Attachment&rdquo; When
+                        Drawing Detected
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Automatically checks the attachment toggle if the tablet
+                        contains a cyan diagram/drawing below the text.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

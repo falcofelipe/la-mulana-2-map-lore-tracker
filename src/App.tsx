@@ -35,8 +35,11 @@ import {
   removeAttachmentFromComment,
   reorderMapPages,
   resetToBlankPlaythrough,
+  saveCommentCategories,
   saveCustomCommentFields,
   saveMarkerDefinitions,
+  saveSeamlessCaptureConfig,
+  saveTabletScannerConfig,
   shrinkMapGrid,
   swapOrMoveCells,
   toggleCellBlockedState,
@@ -65,6 +68,8 @@ import { CommentsTableView } from './components/comments/CommentsTableView';
 import { SketchesBoardView } from './components/sketches/SketchesBoardView';
 import { SettingsAndCustomizeView } from './components/settings/SettingsAndCustomizeView';
 import { GlobalSearchModal } from './components/layout/GlobalSearchModal';
+import { BoundingRectCalibratorModal } from './components/capture/BoundingRectCalibratorModal';
+import { useSeamlessCaptureController } from './hooks/useSeamlessCaptureController';
 
 export const App: React.FC = () => {
   const [isDbReady, setIsDbReady] = useState(false);
@@ -146,6 +151,30 @@ export const App: React.FC = () => {
 
   const activeRoomsCount = allCells.filter((c) => c.state !== 'empty').length;
 
+  const activeTargetCell =
+    inspectedCell ||
+    allCells.find((c) => c.id === selectedCellId) ||
+    null;
+  const activeTargetMap =
+    maps.find((m) => m.id === activeTargetCell?.mapId) || activeMap;
+
+  const captureCtrl = useSeamlessCaptureController({
+    seamlessConfig: config.seamlessCaptureConfig,
+    tabletScannerConfig: config.tabletScannerConfig,
+    customCommentFields: config.customCommentFields,
+    targetCell: activeTargetCell,
+    targetMap: activeTargetMap,
+    onSaveSeamlessConfig: saveSeamlessCaptureConfig,
+    onAssignRoomScreenshot: assignCellScreenshot,
+    onCreateComment: createCommentEntry,
+    onAttachImageToComment: attachImageToComment,
+    onAddCustomFieldOption: addCustomFieldOption,
+    onInspectCell: (cellId) => {
+      setSelectedCellId(cellId);
+      setInspectedCellId(cellId);
+    },
+  });
+
   // 3. Global Keyboard Shortcuts (Ctrl+K, Ctrl+V Screenshot Paste, X Toggle Blocked, Enter Inspect, Esc Close)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -188,6 +217,11 @@ export const App: React.FC = () => {
     };
 
     const handlePaste = async (e: ClipboardEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl?.closest?.('[data-comment-scanner-form="true"]')) {
+        return;
+      }
+
       const targetCellId = inspectedCellId || selectedCellId;
       if (!targetCellId) return;
 
@@ -221,6 +255,10 @@ export const App: React.FC = () => {
     cellCoord: string,
     highlightCommentId?: string
   ) => {
+    if (mapId === 'global' || !cellCoord) {
+      setActiveView('comments');
+      return;
+    }
     setActiveMapId(mapId);
     setActiveView('map');
     const targetCell = allCells.find(
@@ -257,6 +295,18 @@ export const App: React.FC = () => {
         totalCommentsCount={allComments.length}
         unresolvedTodoCount={unresolvedTodoCount}
         sketchesCount={allSketches.length}
+        captureStatus={{
+          isElectron: captureCtrl.isElectron,
+          isWebStreamConnected: captureCtrl.isWebStreamConnected,
+          isFolderWatching:
+            captureCtrl.isWebFolderWatching ||
+            captureCtrl.electronStatus.watchingSteamFolder,
+          roomHotkey: captureCtrl.effectiveConfig.roomHotkey,
+          tabletHotkey: captureCtrl.effectiveConfig.tabletHotkey,
+          onConnectStream: captureCtrl.connectWebGameStream,
+          onTriggerRoomCapture: () => captureCtrl.triggerCaptureNow('room'),
+          onTriggerTabletCapture: () => captureCtrl.triggerCaptureNow('tablet'),
+        }}
       />
 
       {/* VIEW 1: MAP GRID WORKSPACE (+ SPLIT OR MODAL ROOM INSPECTOR) */}
@@ -354,6 +404,7 @@ export const App: React.FC = () => {
                 commentCategories={config.commentCategories}
                 roomFlagOptions={config.roomFlagOptions || []}
                 customCommentFields={config.customCommentFields}
+                tabletScannerConfig={config.tabletScannerConfig}
                 initialHighlightedCommentId={pendingHighlightCommentId}
                 isFullModal={isInspectorFullModal}
                 onToggleFullModal={() =>
@@ -407,6 +458,7 @@ export const App: React.FC = () => {
           comments={allComments}
           commentCategories={config.commentCategories}
           customCommentFields={config.customCommentFields}
+          tabletScannerConfig={config.tabletScannerConfig}
           onJumpToRoom={handleJumpToRoom}
           onCreateComment={createCommentEntry}
           onUpdateComment={updateCommentEntry}
@@ -446,9 +498,27 @@ export const App: React.FC = () => {
             });
           }}
           onSaveMarkerDefinitions={saveMarkerDefinitions}
+          onSaveCommentCategories={saveCommentCategories}
           onUpdateRoomFlagOptions={updateRoomFlagOptions}
           onSaveCustomCommentFields={saveCustomCommentFields}
           onUpdateCustomFieldOptions={updateCustomFieldOptions}
+          onSaveTabletScannerConfig={saveTabletScannerConfig}
+          onSaveSeamlessCaptureConfig={saveSeamlessCaptureConfig}
+          seamlessCaptureRuntime={{
+            isElectron: captureCtrl.isElectron,
+            electronStatus: captureCtrl.electronStatus,
+            isWebStreamConnected: captureCtrl.isWebStreamConnected,
+            webStreamLabel: captureCtrl.webStreamLabel,
+            onConnectWebStream: captureCtrl.connectWebGameStream,
+            onDisconnectWebStream: captureCtrl.disconnectWebGameStream,
+            isWebFolderWatching: captureCtrl.isWebFolderWatching,
+            watchedFolderName: captureCtrl.watchedFolderName,
+            onStartWebFolderWatch: captureCtrl.startWebFolderWatcher,
+            onStopWebFolderWatch: captureCtrl.stopWebFolderWatcher,
+            onToggleElectronSteamWatch:
+              captureCtrl.toggleElectronSteamFolderWatch,
+            onOpenCalibratorWithSample: captureCtrl.openCalibratorWithSample,
+          }}
           onExportZip={exportFullBackupZip}
           onImportZip={async (file) => {
             const firstMapId = await importFullBackupZip(file);
@@ -474,6 +544,47 @@ export const App: React.FC = () => {
           onJumpToRoom={handleJumpToRoom}
           onClose={() => setIsGlobalSearchOpen(false)}
         />
+      )}
+
+      {/* FIRST-CAPTURE OR MANUAL BOUNDING RECT CALIBRATOR MODAL */}
+      {captureCtrl.pendingCalibration && (
+        <BoundingRectCalibratorModal
+          mode={captureCtrl.pendingCalibration.mode}
+          frameBlob={captureCtrl.pendingCalibration.frameBlob}
+          initialRect={
+            captureCtrl.pendingCalibration.mode === 'room'
+              ? captureCtrl.effectiveConfig.roomCropRect
+              : captureCtrl.effectiveConfig.tabletCropRect
+          }
+          isFirstTimePrompt={
+            captureCtrl.pendingCalibration.isFirstTimePrompt
+          }
+          onConfirmRect={captureCtrl.confirmCalibrationRect}
+          onCancel={captureCtrl.cancelCalibration}
+        />
+      )}
+
+      {/* NON-INTRUSIVE CAPTURE TOAST BANNER */}
+      {captureCtrl.toast && (
+        <div
+          onClick={captureCtrl.dismissToast}
+          className={`fixed bottom-4 right-4 z-50 max-w-md px-4 py-3 rounded-xl border shadow-2xl cursor-pointer transition-all ${
+            captureCtrl.toast.kind === 'room'
+              ? 'bg-slate-900/95 border-amber-500/60 text-amber-200'
+              : captureCtrl.toast.kind === 'tablet'
+              ? 'bg-slate-900/95 border-cyan-500/60 text-cyan-200'
+              : captureCtrl.toast.kind === 'error'
+              ? 'bg-rose-950/95 border-rose-500/60 text-rose-200'
+              : 'bg-slate-900/95 border-slate-700 text-slate-200'
+          }`}
+        >
+          <div className="text-xs font-bold">{captureCtrl.toast.title}</div>
+          {captureCtrl.toast.detail && (
+            <div className="text-[11px] opacity-85 mt-0.5 line-clamp-2">
+              {captureCtrl.toast.detail}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

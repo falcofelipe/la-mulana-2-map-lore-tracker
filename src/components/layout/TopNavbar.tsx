@@ -15,6 +15,9 @@ import {
   Search,
   Download,
   Compass,
+  Camera,
+  ScanText,
+  Radio,
 } from 'lucide-react';
 
 export type ActiveAppView = 'map' | 'comments' | 'sketches' | 'settings';
@@ -28,6 +31,16 @@ interface TopNavbarProps {
   totalCommentsCount: number;
   unresolvedTodoCount: number;
   sketchesCount: number;
+  captureStatus?: {
+    isElectron: boolean;
+    isWebStreamConnected: boolean;
+    isFolderWatching: boolean;
+    roomHotkey: string;
+    tabletHotkey: string;
+    onConnectStream: () => void;
+    onTriggerRoomCapture: () => void;
+    onTriggerTabletCapture: () => void;
+  };
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -39,6 +52,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   totalCommentsCount,
   unresolvedTodoCount,
   sketchesCount,
+  captureStatus,
 }) => {
   return (
     <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-4 select-none shrink-0 z-30">
@@ -151,8 +165,51 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </button>
       </nav>
 
-      {/* Right Action Bar: Search (Ctrl+K) & Quick Export */}
+      {/* Right Action Bar: Quick Capture, Search (Ctrl+K) & Quick Export */}
       <div className="flex items-center gap-2 shrink-0">
+        {captureStatus && (
+          <div className="hidden xl:flex items-center gap-1.5 bg-slate-950/90 border border-slate-800 rounded-md px-2 py-1">
+            {captureStatus.isElectron || captureStatus.isWebStreamConnected ? (
+              <>
+                <button
+                  type="button"
+                  onClick={captureStatus.onTriggerRoomCapture}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-colors"
+                  title={`Capture & Crop Room Screenshot (${captureStatus.roomHotkey})`}
+                >
+                  <Camera size={12} />
+                  <span>Room</span>
+                  <kbd className="text-[9px] font-mono opacity-80">
+                    {captureStatus.roomHotkey}
+                  </kbd>
+                </button>
+                <button
+                  type="button"
+                  onClick={captureStatus.onTriggerTabletCapture}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 transition-colors"
+                  title={`Capture, Crop & OCR Tablet Screenshot (${captureStatus.tabletHotkey})`}
+                >
+                  <ScanText size={12} />
+                  <span>Tablet</span>
+                  <kbd className="text-[9px] font-mono opacity-80">
+                    {captureStatus.tabletHotkey}
+                  </kbd>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={captureStatus.onConnectStream}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium text-slate-300 hover:text-amber-300 hover:bg-slate-900 transition-colors"
+                title="Connect live La-Mulana 2 game window stream for 1-click or Gamepad screenshot & tablet capture"
+              >
+                <Radio size={12} className="text-amber-400" />
+                <span>Connect Game Capture</span>
+              </button>
+            )}
+          </div>
+        )}
+
         <button
           type="button"
           onClick={onOpenGlobalSearch}

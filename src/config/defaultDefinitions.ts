@@ -13,8 +13,33 @@ import {
   MapPage,
   MarkerDefinition,
   ProjectConfig,
+  SeamlessCaptureConfig,
+  TabletScannerConfig,
 } from '../types/models';
 import { formatCellCoord } from '../utils/coordinates';
+
+export const DEFAULT_TABLET_SCANNER_CONFIG: TabletScannerConfig = {
+  headerTargetMode: 'speaker_or_title',
+  targetCustomFieldId: undefined,
+  autoHighlightColoredText: true,
+  autoKeepAttachmentOnDrawing: true,
+};
+
+export const DEFAULT_SEAMLESS_CAPTURE_CONFIG: SeamlessCaptureConfig = {
+  enabled: true,
+  roomHotkey: 'Alt+1',
+  tabletHotkey: 'Alt+2',
+  roomGamepadCombo: 'Select+R1',
+  tabletGamepadCombo: 'Select+L1',
+  roomCropRect: null,
+  tabletCropRect: null,
+  promptCalibrationOnFirstCapture: true,
+  tabletQuickSaveMode: 'auto_save',
+  playSoundOnCapture: true,
+  preferredWindowTitle: 'La-Mulana 2',
+  steamWatchFolderPath: undefined,
+  autoClassifyWatchedScreenshots: true,
+};
 
 export const DEFAULT_MARKER_DEFINITIONS: MarkerDefinition[] = [
   {
@@ -67,7 +92,7 @@ export const DEFAULT_MARKER_DEFINITIONS: MarkerDefinition[] = [
   {
     id: 'warp_door',
     name: 'Warp / Transition',
-    description: 'Teleport portals, doors, or cross-map transitions (e.g., -> AcB $A$8).',
+    description: 'Teleport portals, doors, or cross-map transitions (e.g., -> AcB A8).',
     iconKey: 'warp',
     defaultColor: '#06b6d4', // Cyan
     showShortLabelOnMacro: true,
@@ -100,7 +125,7 @@ export const DEFAULT_COMMENT_CATEGORIES: CommentCategoryDefinition[] = [
   {
     id: 'shortcut_hint',
     code: 'Sk',
-    name: 'Shortcut / Hint',
+    name: 'Skeleton',
     badgeColor: '#06b6d4', // Cyan
     supportsResolved: false,
   },
@@ -126,6 +151,8 @@ export function createDefaultProjectConfig(): ProjectConfig {
     commentCategories: DEFAULT_COMMENT_CATEGORIES,
     roomFlagOptions: [],
     customCommentFields: [],
+    tabletScannerConfig: { ...DEFAULT_TABLET_SCANNER_CONFIG },
+    seamlessCaptureConfig: { ...DEFAULT_SEAMLESS_CAPTURE_CONFIG },
     updatedAt: Date.now(),
   };
 }

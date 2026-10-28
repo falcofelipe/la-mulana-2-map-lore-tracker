@@ -31,6 +31,7 @@ import {
   MapPage,
   MarkerDefinition,
   PinMarker,
+  TabletScannerConfig,
   VectorArrow,
 } from '../../types/models';
 import { renderHighlightedLoreText } from '../../utils/textHighlight';
@@ -40,6 +41,14 @@ import {
   CommentCrossReferenceBadges,
   CommentCrossReferenceEditor,
 } from '../comments/CommentCrossReferences';
+import {
+  ScannedAttachmentState,
+  TabletScreenshotScannerBar,
+} from '../comments/TabletScreenshotScannerBar';
+import {
+  extractImageBlobFromPasteEvent,
+  readImageBlobFromClipboard,
+} from '../../utils/clipboardImage';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { SketchCanvasModal } from '../sketches/SketchCanvasModal';
 
@@ -54,6 +63,7 @@ interface RoomDetailDrawerProps {
   commentCategories: CommentCategoryDefinition[];
   roomFlagOptions: string[];
   customCommentFields: CustomFieldDefinition[];
+  tabletScannerConfig?: TabletScannerConfig;
   initialHighlightedCommentId?: string | null;
   isFullModal: boolean;
   onToggleFullModal: () => void;
@@ -98,6 +108,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   commentCategories,
   roomFlagOptions,
   customCommentFields,
+  tabletScannerConfig,
   initialHighlightedCommentId,
   isFullModal,
   onToggleFullModal,
@@ -132,6 +143,12 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   const [newCustomFields, setNewCustomFields] = useState<Record<string, string>>({});
   const [newRelatedCommentIds, setNewRelatedCommentIds] = useState<string[]>([]);
   const [newRelatedCellIds, setNewRelatedCellIds] = useState<string[]>([]);
+  const [pendingNewScan, setPendingNewScan] =
+    useState<ScannedAttachmentState | null>(null);
+  const [pastedNewFile, setPastedNewFile] = useState<{
+    blob: Blob;
+    timestamp: number;
+  } | null>(null);
 
   // Editing existing comment state
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -141,6 +158,12 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
   const [editCustomFields, setEditCustomFields] = useState<Record<string, string>>({});
   const [editRelatedCommentIds, setEditRelatedCommentIds] = useState<string[]>([]);
   const [editRelatedCellIds, setEditRelatedCellIds] = useState<string[]>([]);
+  const [pendingEditScan, setPendingEditScan] =
+    useState<ScannedAttachmentState | null>(null);
+  const [pastedEditFile, setPastedEditFile] = useState<{
+    blob: Blob;
+    timestamp: number;
+  } | null>(null);
 
   // Highlighted comment (when jumping from a linked pin or cross-reference)
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(
@@ -228,9 +251,15 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
 
   const handleAddCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newContent.trim() && !newSpeakerOrTitle.trim()) return;
+    if (
+      !newContent.trim() &&
+      !newSpeakerOrTitle.trim() &&
+      !(pendingNewScan && pendingNewScan.keepAttachment)
+    ) {
+      return;
+    }
 
-    await onCreateComment({
+    const created = await onCreateComment({
       mapId: map.id,
       cellId: cell.id,
       cellCoord: cell.coord,
@@ -247,11 +276,16 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       attachmentBlobIds: [],
     });
 
+    if (pendingNewScan && pendingNewScan.keepAttachment) {
+      await onAttachImageToComment(created.id, pendingNewScan.blob);
+    }
+
     setNewSpeakerOrTitle('');
     setNewContent('');
     setNewCustomFields({});
     setNewRelatedCommentIds([]);
     setNewRelatedCellIds([]);
+    setPendingNewScan(null);
   };
 
   const handleStartEditComment = (comm: CommentEntry) => {
@@ -262,6 +296,7 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
     setEditCustomFields(comm.customFields || {});
     setEditRelatedCommentIds(comm.relatedCommentIds || []);
     setEditRelatedCellIds(comm.relatedCellIds || []);
+    setPendingEditScan(null);
   };
 
   const handleSaveEditComment = async (commentId: string) => {
@@ -273,6 +308,10 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
       relatedCommentIds: editRelatedCommentIds,
       relatedCellIds: editRelatedCellIds,
     });
+    if (pendingEditScan && pendingEditScan.keepAttachment) {
+      await onAttachImageToComment(commentId, pendingEditScan.blob);
+    }
+    setPendingEditScan(null);
     setEditingCommentId(null);
   };
 
@@ -533,8 +572,64 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                       <div
                         key={comm.id}
                         id={`comment-card-${comm.id}`}
+                        data-comment-scanner-form="true"
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          for (let i = 0; i < items.length; i++) {
+                            if (items[i].type.startsWith('image/')) {
+                              const blob = items[i].getAsFile();
+                              if (blob) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setPastedEditFile({
+                                  blob,
+                                  timestamp: Date.now(),
+                                });
+                                return;
+                              }
+                            }
+                          }
+                        }}
                         className="bg-slate-950 border border-amber-500/60 rounded-lg p-3 flex flex-col gap-2 text-xs"
                       >
+                        <TabletScreenshotScannerBar
+                          compact
+                          scannerConfig={tabletScannerConfig}
+                          customCommentFields={customCommentFields}
+                          pendingScan={pendingEditScan}
+                          onChangePendingScan={setPendingEditScan}
+                          externalPasteFile={pastedEditFile}
+                          onAddCustomFieldOption={onAddCustomFieldOption}
+                          onApplyParsedData={(parsed) => {
+                            let nextText = parsed.transcript;
+                            if (parsed.appendedHeaderNote) {
+                              nextText = nextText
+                                ? `${nextText}\n\n${parsed.appendedHeaderNote}`
+                                : parsed.appendedHeaderNote;
+                            }
+                            if (nextText) {
+                              setEditContent((prev) =>
+                                prev.trim()
+                                  ? `${prev.trim()}\n${nextText}`
+                                  : nextText
+                              );
+                            }
+                            if (parsed.routedSpeakerOrTitle) {
+                              setEditSpeaker((prev) =>
+                                prev.trim() || parsed.routedSpeakerOrTitle!
+                              );
+                            }
+                            if (parsed.routedCustomField) {
+                              const { fieldId, value } =
+                                parsed.routedCustomField;
+                              setEditCustomFields((prev) => ({
+                                ...prev,
+                                [fieldId]: value,
+                              }));
+                            }
+                          }}
+                        />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <select
                             value={editCategory}
@@ -636,7 +731,17 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                     <div
                       key={comm.id}
                       id={`comment-card-${comm.id}`}
-                      className={`bg-slate-950/90 border rounded-lg p-3 flex flex-col gap-2 transition-all ${
+                      tabIndex={0}
+                      data-comment-scanner-form="true"
+                      onPaste={async (e) => {
+                        const blob = extractImageBlobFromPasteEvent(e);
+                        if (blob) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await onAttachImageToComment(comm.id, blob);
+                        }
+                      }}
+                      className={`bg-slate-950/90 border rounded-lg p-3 flex flex-col gap-2 transition-all focus:outline-none focus:border-cyan-400/70 ${
                         isHighlighted
                           ? 'border-amber-400 ring-2 ring-amber-400/40'
                           : comm.resolved
@@ -685,22 +790,29 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                             </button>
                           )}
 
-                          <label
-                            title="Attach reference screenshot or crop"
-                            className="p-1 text-slate-400 hover:text-cyan-300 cursor-pointer"
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const blob = await readImageBlobFromClipboard();
+                                if (blob) {
+                                  await onAttachImageToComment(comm.id, blob);
+                                } else {
+                                  window.alert(
+                                    'No image found in clipboard. Copy a screenshot first, then click here (or click this comment and press Ctrl+V)!'
+                                  );
+                                }
+                              } catch {
+                                window.alert(
+                                  'Click this comment card and press Ctrl+V to paste an image attachment from your clipboard.'
+                                );
+                              }
+                            }}
+                            title="Paste image attachment from clipboard (or click comment and press Ctrl+V)"
+                            className="p-1 text-slate-400 hover:text-cyan-300"
                           >
                             <ImagePlus size={13} />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) onAttachImageToComment(comm.id, file);
-                                e.target.value = '';
-                              }}
-                            />
-                          </label>
+                          </button>
 
                           <button
                             type="button"
@@ -800,6 +912,25 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
           {/* QUICK-ADD COMMENT / TABLET / NPC FORM */}
           <form
             onSubmit={handleAddCommentSubmit}
+            data-comment-scanner-form="true"
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                  const blob = items[i].getAsFile();
+                  if (blob) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPastedNewFile({
+                      blob,
+                      timestamp: Date.now(),
+                    });
+                    return;
+                  }
+                }
+              }
+            }}
             className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-3"
           >
             <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
@@ -808,6 +939,40 @@ export const RoomDetailDrawer: React.FC<RoomDetailDrawerProps> = ({
                 Add Tablet, NPC Quote, or TODO to {map.codePrefix} {cell.coord}
               </span>
             </div>
+
+            <TabletScreenshotScannerBar
+              scannerConfig={tabletScannerConfig}
+              customCommentFields={customCommentFields}
+              pendingScan={pendingNewScan}
+              onChangePendingScan={setPendingNewScan}
+              externalPasteFile={pastedNewFile}
+              onAddCustomFieldOption={onAddCustomFieldOption}
+              onApplyParsedData={(parsed) => {
+                let nextText = parsed.transcript;
+                if (parsed.appendedHeaderNote) {
+                  nextText = nextText
+                    ? `${nextText}\n\n${parsed.appendedHeaderNote}`
+                    : parsed.appendedHeaderNote;
+                }
+                if (nextText) {
+                  setNewContent((prev) =>
+                    prev.trim() ? `${prev.trim()}\n${nextText}` : nextText
+                  );
+                }
+                if (parsed.routedSpeakerOrTitle) {
+                  setNewSpeakerOrTitle((prev) =>
+                    prev.trim() || parsed.routedSpeakerOrTitle!
+                  );
+                }
+                if (parsed.routedCustomField) {
+                  const { fieldId, value } = parsed.routedCustomField;
+                  setNewCustomFields((prev) => ({
+                    ...prev,
+                    [fieldId]: value,
+                  }));
+                }
+              }}
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
               <div>
