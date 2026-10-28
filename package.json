@@ -3,7 +3,7 @@
   "private": false,
   "version": "1.0.0",
   "description": "Local-first interactive map grid, room screenshot annotator, and relational tablet/NPC lore database for La-Mulana 2.",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
     "dev": "vite",
