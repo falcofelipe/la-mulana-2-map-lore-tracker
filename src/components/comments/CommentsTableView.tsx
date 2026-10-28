@@ -31,7 +31,10 @@ import {
   MapPage,
 } from '../../types/models';
 import { normalizeCellCoord } from '../../utils/coordinates';
-import { renderHighlightedLoreText } from '../../utils/textHighlight';
+import {
+  renderHighlightedLoreText,
+  stripLoreColorTags,
+} from '../../utils/textHighlight';
 import { BlobImagePreview } from '../common/BlobImagePreview';
 import { CustomSelectDropdown } from './CustomSelectDropdown';
 import {
@@ -252,6 +255,7 @@ export const CommentsTableView: React.FC<CommentsTableViewProps> = ({
           roomName,
           comm.speakerOrTitle,
           comm.content,
+          stripLoreColorTags(comm.content),
           customVals,
         ]
           .filter(Boolean)

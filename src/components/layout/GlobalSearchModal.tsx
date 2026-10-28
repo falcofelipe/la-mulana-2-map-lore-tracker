@@ -15,6 +15,10 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { CommentEntry, GridCell, MapPage } from '../../types/models';
+import {
+  renderHighlightedLoreText,
+  stripLoreColorTags,
+} from '../../utils/textHighlight';
 
 interface GlobalSearchModalProps {
   maps: MapPage[];
@@ -130,9 +134,10 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       const customValsList = comm.customFields
         ? Object.values(comm.customFields).filter(Boolean)
         : [];
+      const plainContent = stripLoreColorTags(comm.content);
       const commHaystack = `${mapObj.codePrefix} ${comm.cellCoord} ${
         cellObj?.roomName || ''
-      } ${comm.speakerOrTitle || ''} ${comm.content} ${customValsList.join(
+      } ${comm.speakerOrTitle || ''} ${comm.content} ${plainContent} ${customValsList.join(
         ' '
       )}`.toLowerCase();
 
@@ -239,7 +244,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                       )}
                     </div>
                     <p className="text-xs text-slate-400 line-clamp-2 mt-1">
-                      {item.subtitle}
+                      {item.kind === 'comment'
+                        ? renderHighlightedLoreText(item.subtitle)
+                        : item.subtitle}
                     </p>
                   </div>
                 </div>

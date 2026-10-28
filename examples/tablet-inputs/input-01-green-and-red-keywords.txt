@@ -1,5 +1,5 @@
 Title / Header:
 Keep Attachment (Drawing Present): true
 Main Content:
-You must possess the GOLDEN KEY.
-The power of storms rests in the belly of the Great Serpent, JORMUNGAND.
+You must possess the {g:golden key}.
+The power of storms rests in the belly of the Great Serpent, {r:Jormungand}.
