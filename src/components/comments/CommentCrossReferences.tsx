@@ -477,8 +477,8 @@ export const CommentCrossReferenceEditor: React.FC<
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={
                   pickerTab === 'comments'
-                    ? 'Search tablets, NPC quotes, or coordinates (e.g. YgA $C$2)...'
-                    : 'Search rooms by map, coordinate ($C$2), or room name...'
+                    ? 'Search tablets, NPC quotes, or coordinates (e.g. YgA C2)...'
+                    : 'Search rooms by map, coordinate (C2), or room name...'
                 }
                 className="w-full bg-slate-950 border border-slate-700 rounded pl-7 pr-2 py-1 text-[11px] text-slate-100 focus:outline-none focus:border-amber-400"
               />
@@ -526,7 +526,7 @@ export const CommentCrossReferenceEditor: React.FC<
               )
             ) : matchingCells.length === 0 ? (
               <div className="p-3 text-center text-[11px] text-slate-500">
-                Type a coordinate (e.g. $C$2) or room name to find rooms.
+                Type a coordinate (e.g. C2) or room name to find rooms.
               </div>
             ) : (
               matchingCells.map((c) => {

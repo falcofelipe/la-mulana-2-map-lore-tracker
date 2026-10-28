@@ -156,8 +156,13 @@ export const GridCellCard: React.FC<GridCellCardProps> = ({
           {layerVisibility.showPins &&
             visibleMarkers.map((pin) => {
               const def = markerDefsMap.get(pin.typeId);
+              const isBroken = pin.typeId === 'broken' || !def;
+              const badgeText = isBroken
+                ? pin.shortLabel || 'BROKEN'
+                : pin.shortLabel;
               const showText =
-                pin.shortLabel && (def?.showShortLabelOnMacro ?? Boolean(pin.shortLabel));
+                isBroken ||
+                (badgeText && (def?.showShortLabelOnMacro ?? Boolean(badgeText)));
 
               return (
                 <div
@@ -166,18 +171,24 @@ export const GridCellCard: React.FC<GridCellCardProps> = ({
                     left: `${pin.xPercent}%`,
                     top: `${pin.yPercent}%`,
                   }}
-                  title={`${def?.name || 'Marker'}${
-                    pin.shortLabel ? `: ${pin.shortLabel}` : ''
+                  title={`${isBroken ? 'BROKEN MARKER (Deleted Category)' : def?.name || 'Marker'}${
+                    badgeText ? `: ${badgeText}` : ''
                   }${pin.notes ? ` — ${pin.notes}` : ''}`}
                   className={`absolute -translate-x-1/2 -translate-y-1/2 z-20 flex items-center gap-0.5 pointer-events-none ${
                     pin.resolved ? 'opacity-45 grayscale' : ''
                   }`}
                 >
                   <div
-                    style={{ backgroundColor: pin.color }}
-                    className="w-4 h-4 rounded-full border border-slate-950 shadow-md flex items-center justify-center text-slate-950 font-bold text-[9px]"
+                    style={{ backgroundColor: isBroken ? '#ef4444' : pin.color }}
+                    className={`w-4 h-4 rounded-full shadow-md flex items-center justify-center font-bold text-[9px] ${
+                      isBroken
+                        ? 'border-2 border-white ring-2 ring-red-500 text-white animate-pulse'
+                        : 'border border-slate-950 text-slate-950'
+                    }`}
                   >
-                    {def?.defaultSymbol ? (
+                    {isBroken ? (
+                      <span>!</span>
+                    ) : def?.defaultSymbol ? (
                       <span>{def.defaultSymbol}</span>
                     ) : (
                       <MarkerIcon
@@ -188,8 +199,14 @@ export const GridCellCard: React.FC<GridCellCardProps> = ({
                     )}
                   </div>
                   {showText && (
-                    <span className="px-1 py-0.2 rounded bg-slate-950/90 text-slate-100 border border-slate-700/80 text-[9px] font-semibold whitespace-nowrap shadow">
-                      {pin.shortLabel}
+                    <span
+                      className={`px-1 py-0.2 rounded text-[9px] font-semibold whitespace-nowrap shadow border ${
+                        isBroken
+                          ? 'bg-red-600 text-white border-red-300 font-bold'
+                          : 'bg-slate-950/90 text-slate-100 border-slate-700/80'
+                      }`}
+                    >
+                      {badgeText}
                     </span>
                   )}
                 </div>

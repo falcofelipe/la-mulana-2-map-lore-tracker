@@ -24,10 +24,10 @@ describe('Excel Grid Coordinate Utilities', () => {
     expect(letterToColIndex('AB')).toBe(27);
   });
 
-  it('formats and parses ($Col$Row) coordinates accurately', () => {
-    expect(formatCellCoord(0, 0)).toBe('$A$1');
-    expect(formatCellCoord(1, 2)).toBe('$C$2');
-    expect(formatCellCoord(6, 7)).toBe('$H$7');
+  it('formats and parses (ColRow) coordinates accurately', () => {
+    expect(formatCellCoord(0, 0)).toBe('A1');
+    expect(formatCellCoord(1, 2)).toBe('C2');
+    expect(formatCellCoord(6, 7)).toBe('H7');
 
     expect(parseCellCoord('$C$2')).toEqual({ row: 1, col: 2 });
     expect(parseCellCoord('c2')).toEqual({ row: 1, col: 2 });
@@ -35,11 +35,11 @@ describe('Excel Grid Coordinate Utilities', () => {
     expect(parseCellCoord('invalid')).toBeNull();
   });
 
-  it('normalizes user coordinate inputs into canonical $Col$Row format', () => {
-    expect(normalizeCellCoord('c2')).toBe('$C$2');
-    expect(normalizeCellCoord('C2')).toBe('$C$2');
-    expect(normalizeCellCoord('$c2')).toBe('$C$2');
-    expect(normalizeCellCoord('$C$2')).toBe('$C$2');
-    expect(normalizeCellCoord('  aa10 ')).toBe('$AA$10');
+  it('normalizes user coordinate inputs into canonical ColRow format', () => {
+    expect(normalizeCellCoord('c2')).toBe('C2');
+    expect(normalizeCellCoord('C2')).toBe('C2');
+    expect(normalizeCellCoord('$c2')).toBe('C2');
+    expect(normalizeCellCoord('$C$2')).toBe('C2');
+    expect(normalizeCellCoord('  aa10 ')).toBe('AA10');
   });
 });
