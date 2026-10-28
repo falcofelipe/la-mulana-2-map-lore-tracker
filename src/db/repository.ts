@@ -1032,24 +1032,30 @@ export async function updateCommentEntry(
     ...updates,
   };
 
-  if (nextUpdates.cellCoord !== undefined) {
-    nextUpdates.cellCoord = normalizeCellCoord(nextUpdates.cellCoord);
-  }
-
   const targetMapId = nextUpdates.mapId ?? existing.mapId;
-  const targetCoord = nextUpdates.cellCoord ?? existing.cellCoord;
 
-  // Automatically resolve and migrate cellId when Map or Cell Coordinate changes
-  if (
-    (nextUpdates.mapId !== undefined && nextUpdates.mapId !== existing.mapId) ||
-    (nextUpdates.cellCoord !== undefined &&
-      nextUpdates.cellCoord !== existing.cellCoord)
-  ) {
-    const matchingCell = await db.cells
-      .where('[mapId+coord]')
-      .equals([targetMapId, targetCoord])
-      .first();
-    nextUpdates.cellId = matchingCell?.id;
+  if (targetMapId === 'global') {
+    nextUpdates.cellCoord = '';
+    nextUpdates.cellId = undefined;
+  } else {
+    if (nextUpdates.cellCoord !== undefined) {
+      nextUpdates.cellCoord = normalizeCellCoord(nextUpdates.cellCoord);
+    }
+
+    const targetCoord = nextUpdates.cellCoord ?? existing.cellCoord;
+
+    // Automatically resolve and migrate cellId when Map or Cell Coordinate changes
+    if (
+      (nextUpdates.mapId !== undefined && nextUpdates.mapId !== existing.mapId) ||
+      (nextUpdates.cellCoord !== undefined &&
+        nextUpdates.cellCoord !== existing.cellCoord)
+    ) {
+      const matchingCell = await db.cells
+        .where('[mapId+coord]')
+        .equals([targetMapId, targetCoord])
+        .first();
+      nextUpdates.cellId = matchingCell?.id;
+    }
   }
 
   await db.comments.update(commentId, {
@@ -1225,18 +1231,78 @@ export async function updateRoomFlagOptions(
 export async function saveMarkerDefinitions(
   definitions: MarkerDefinition[]
 ): Promise<void> {
-  await db.config.update('singleton', {
-    markerDefinitions: definitions,
-    updatedAt: Date.now(),
+  const now = Date.now();
+  await db.transaction('rw', [db.config, db.cells], async () => {
+    await db.config.update('singleton', {
+      markerDefinitions: definitions,
+      updatedAt: now,
+    });
+
+    // Convert any PinMarkers whose typeId was deleted into a red "BROKEN" marker
+    const validTypeIds = new Set(definitions.map((d) => d.id));
+    const allCells = await db.cells.toArray();
+    const cellsToUpdate: GridCell[] = [];
+
+    for (const cell of allCells) {
+      if (cell.markers.length === 0) continue;
+      let changed = false;
+      const nextMarkers = cell.markers.map((pin) => {
+        if (validTypeIds.has(pin.typeId) || pin.typeId === 'broken') {
+          return pin;
+        }
+        changed = true;
+        const prevLabel = pin.shortLabel?.trim() || '';
+        const nextLabel = prevLabel
+          ? prevLabel.toUpperCase().includes('BROKEN')
+            ? prevLabel
+            : `BROKEN (${prevLabel})`
+          : 'BROKEN';
+        return {
+          ...pin,
+          typeId: 'broken',
+          color: '#ef4444',
+          shortLabel: nextLabel,
+        };
+      });
+
+      if (changed) {
+        cellsToUpdate.push({
+          ...cell,
+          markers: nextMarkers,
+          updatedAt: now,
+        });
+      }
+    }
+
+    if (cellsToUpdate.length > 0) {
+      await db.cells.bulkPut(cellsToUpdate);
+    }
   });
 }
 
 export async function saveCommentCategories(
   categories: CommentCategoryDefinition[]
 ): Promise<void> {
-  await db.config.update('singleton', {
-    commentCategories: categories,
-    updatedAt: Date.now(),
+  const now = Date.now();
+  await db.transaction('rw', [db.config, db.comments], async () => {
+    await db.config.update('singleton', {
+      commentCategories: categories,
+      updatedAt: now,
+    });
+
+    const validIds = new Set(categories.map((c) => c.id));
+    const fallbackId = categories[0]?.id || 'general';
+    const allComments = await db.comments.toArray();
+    const orphaned = allComments.filter((c) => !validIds.has(c.category));
+    if (orphaned.length > 0) {
+      await db.comments.bulkPut(
+        orphaned.map((c) => ({
+          ...c,
+          category: fallbackId,
+          updatedAt: now,
+        }))
+      );
+    }
   });
 }
 

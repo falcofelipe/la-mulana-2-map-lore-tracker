@@ -112,6 +112,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
   const [arrowColor, setArrowColor] = useState('#06b6d4');
   const [arrowDashed, setArrowDashed] = useState(false);
   const [arrowBidirectional, setArrowBidirectional] = useState(false);
+  const [arrowHasArrowhead, setArrowHasArrowhead] = useState(true);
   const [arrowLabel, setArrowLabel] = useState('');
 
   // Cross-room comment search state inside the Pin Editor
@@ -269,7 +270,8 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
           points: nextPoints,
           color: arrowColor,
           dashed: arrowDashed,
-          bidirectional: arrowBidirectional,
+          bidirectional: arrowHasArrowhead ? arrowBidirectional : false,
+          hasArrowhead: arrowHasArrowhead,
           label: arrowLabel.trim() || undefined,
         });
         setDraftArrowPoints([]);
@@ -430,6 +432,15 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
             <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
+                checked={arrowHasArrowhead}
+                onChange={(e) => setArrowHasArrowhead(e.target.checked)}
+                className="accent-amber-400"
+              />
+              <span>Arrowhead</span>
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
                 checked={arrowDashed}
                 onChange={(e) => setArrowDashed(e.target.checked)}
                 className="accent-amber-400"
@@ -440,8 +451,9 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
               <input
                 type="checkbox"
                 checked={arrowBidirectional}
+                disabled={!arrowHasArrowhead}
                 onChange={(e) => setArrowBidirectional(e.target.checked)}
-                className="accent-amber-400"
+                className="accent-amber-400 disabled:opacity-40"
               />
               <span>2-Way</span>
             </label>
@@ -535,6 +547,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
           draftColor={arrowColor}
           draftDashed={arrowDashed}
           draftBidirectional={arrowBidirectional}
+          draftHasArrowhead={arrowHasArrowhead}
           interactive={toolMode === 'cursor'}
           selectedArrowId={selectedArrowId}
           onSelectArrow={(id) => {
@@ -546,6 +559,10 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
         {/* Pin Markers Layer */}
         {cell.markers.map((pin) => {
           const def = markerDefsMap.get(pin.typeId);
+          const isBroken = pin.typeId === 'broken' || !def;
+          const badgeText = isBroken
+            ? pin.shortLabel || 'BROKEN'
+            : pin.shortLabel;
           const isSelected = pin.id === selectedPinId;
 
           return (
@@ -573,14 +590,18 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
               } ${pin.resolved ? 'opacity-55' : ''}`}
             >
               <div
-                style={{ backgroundColor: pin.color }}
-                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-slate-950 font-bold text-xs shadow-lg transition-transform ${
-                  isSelected
-                    ? 'border-white scale-125 ring-4 ring-amber-400/40'
-                    : 'border-slate-950 group-hover:scale-110'
+                style={{ backgroundColor: isBroken ? '#ef4444' : pin.color }}
+                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center font-bold text-xs shadow-lg transition-transform ${
+                  isBroken
+                    ? 'border-white ring-4 ring-red-500/80 text-white animate-pulse'
+                    : isSelected
+                    ? 'border-white scale-125 ring-4 ring-amber-400/40 text-slate-950'
+                    : 'border-slate-950 group-hover:scale-110 text-slate-950'
                 }`}
               >
-                {def?.defaultSymbol ? (
+                {isBroken ? (
+                  <span>!</span>
+                ) : def?.defaultSymbol ? (
                   <span>{def.defaultSymbol}</span>
                 ) : (
                   <MarkerIcon
@@ -591,15 +612,17 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                 )}
               </div>
 
-              {pin.shortLabel && (
+              {badgeText && (
                 <span
                   className={`px-1.5 py-0.5 rounded text-xs font-bold whitespace-nowrap shadow-md border ${
-                    isSelected
+                    isBroken
+                      ? 'bg-red-600 text-white border-red-200'
+                      : isSelected
                       ? 'bg-amber-500 text-slate-950 border-white'
                       : 'bg-slate-950/90 text-slate-100 border-slate-700'
                   } ${pin.resolved ? 'line-through opacity-75' : ''}`}
                 >
-                  {pin.shortLabel}
+                  {badgeText}
                 </span>
               )}
             </div>
@@ -684,7 +707,11 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                 Marker Category
               </label>
               <select
-                value={selectedPin.typeId}
+                value={
+                  markerDefsMap.has(selectedPin.typeId)
+                    ? selectedPin.typeId
+                    : 'broken'
+                }
                 onChange={(e) => {
                   const nextDef = markerDefsMap.get(e.target.value);
                   onUpdatePin(selectedPin.id, {
@@ -692,8 +719,17 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                     color: nextDef?.defaultColor || selectedPin.color,
                   });
                 }}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
+                className={`w-full bg-slate-950 border rounded px-2 py-1.5 text-slate-100 ${
+                  !markerDefsMap.has(selectedPin.typeId)
+                    ? 'border-red-500 text-red-300 font-bold'
+                    : 'border-slate-700'
+                }`}
               >
+                {!markerDefsMap.has(selectedPin.typeId) && (
+                  <option value="broken">
+                    ⚠️ BROKEN (Deleted Marker Category — Choose Replacement)
+                  </option>
+                )}
                 {markerDefinitions.map((def) => (
                   <option key={def.id} value={def.id}>
                     {def.name}
@@ -712,7 +748,7 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
                 onChange={(e) =>
                   onUpdatePin(selectedPin.id, { shortLabel: e.target.value })
                 }
-                placeholder='e.g. "?", "Raijin / Fujin", "-> AcB $A$8"'
+                placeholder='e.g. "?", "Raijin / Fujin", "-> AcB A8"'
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
               />
             </div>
@@ -1114,6 +1150,19 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
             <label className="flex items-center gap-1 text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
+                checked={selectedArrow.hasArrowhead !== false}
+                onChange={(e) =>
+                  onUpdateArrow(selectedArrow.id, {
+                    hasArrowhead: e.target.checked,
+                  })
+                }
+                className="accent-amber-400"
+              />
+              <span>Arrowhead</span>
+            </label>
+            <label className="flex items-center gap-1 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
                 checked={selectedArrow.dashed}
                 onChange={(e) =>
                   onUpdateArrow(selectedArrow.id, { dashed: e.target.checked })
@@ -1126,12 +1175,13 @@ export const AnnotatedRoomCanvas: React.FC<AnnotatedRoomCanvasProps> = ({
               <input
                 type="checkbox"
                 checked={selectedArrow.bidirectional}
+                disabled={selectedArrow.hasArrowhead === false}
                 onChange={(e) =>
                   onUpdateArrow(selectedArrow.id, {
                     bidirectional: e.target.checked,
                   })
                 }
-                className="accent-amber-400"
+                className="accent-amber-400 disabled:opacity-40"
               />
               <span>2-Way</span>
             </label>

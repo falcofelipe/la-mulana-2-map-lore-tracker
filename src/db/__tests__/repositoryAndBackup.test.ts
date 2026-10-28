@@ -52,21 +52,21 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
   it('inserts and deletes rows/columns at arbitrary indices while shifting cell coords, comments, and cross-map warp pin labels', async () => {
     const map2 = await createMapPage('AcB', 'Ancient Chaos', 4, 4);
 
-    // Find cell $B$2 (row=1, col=1) on map 1
+    // Find cell B2 (row=1, col=1) on map 1
     const cellB2 = await db.cells
       .where('[mapId+row+col]')
       .equals([initialMapId, 1, 1])
       .first();
     expect(cellB2).toBeDefined();
-    expect(cellB2!.coord).toBe('$B$2');
+    expect(cellB2!.coord).toBe('B2');
 
     await updateCellMetadata(cellB2!.id, { roomName: 'Chamber of Birth' });
 
-    // Attach a comment to $B$2
+    // Attach a comment to B2
     const comm = await createCommentEntry({
       mapId: initialMapId,
       cellId: cellB2!.id,
-      cellCoord: '$B$2',
+      cellCoord: 'B2',
       category: 'tablet',
       speakerOrTitle: 'T1',
       content: 'Speak the mantra of BIRTH.',
@@ -74,7 +74,7 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
       attachmentBlobIds: [],
     });
 
-    // Place a Warp Pin on map2 ($A$1) targeting cellB2 on map1
+    // Place a Warp Pin on map2 (A1) targeting cellB2 on map1
     const map2CellA1 = await db.cells
       .where('[mapId+row+col]')
       .equals([map2.id, 0, 0])
@@ -86,62 +86,62 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
       yPercent: 50,
       typeId: 'warp_transition',
       color: '#a855f7',
-      shortLabel: '⇄ F01 $B$2',
+      shortLabel: '⇄ F01 B2',
       targetMapId: initialMapId,
       targetCellId: cellB2!.id,
       isBidirectionalWarp: true,
       resolved: false,
     });
 
-    // 1. Insert a row at index 1 (above $B$2) -> cellB2 should shift to $B$3 (row=2, col=1)
+    // 1. Insert a row at index 1 (above B2) -> cellB2 should shift to B3 (row=2, col=1)
     await insertRowAt(initialMapId, 1);
 
     const shiftedAfterRow = await db.cells.get(cellB2!.id);
     expect(shiftedAfterRow?.row).toBe(2);
     expect(shiftedAfterRow?.col).toBe(1);
-    expect(shiftedAfterRow?.coord).toBe('$B$3');
+    expect(shiftedAfterRow?.coord).toBe('B3');
 
     const commAfterRow = await db.comments.get(comm.id);
-    expect(commAfterRow?.cellCoord).toBe('$B$3');
+    expect(commAfterRow?.cellCoord).toBe('B3');
 
     const map2CellAfterRow = await db.cells.get(map2CellA1!.id);
     const pinAfterRow = map2CellAfterRow?.markers.find(
       (m) => m.id === warpPin.id
     );
-    expect(pinAfterRow?.shortLabel).toBe('⇄ F01 $B$3');
+    expect(pinAfterRow?.shortLabel).toBe('⇄ F01 B3');
 
-    // 2. Insert a column at index 1 (left of $B$3) -> cellB2 should shift to $C$3 (row=2, col=2)
+    // 2. Insert a column at index 1 (left of B3) -> cellB2 should shift to C3 (row=2, col=2)
     await insertColAt(initialMapId, 1);
 
     const shiftedAfterCol = await db.cells.get(cellB2!.id);
     expect(shiftedAfterCol?.row).toBe(2);
     expect(shiftedAfterCol?.col).toBe(2);
-    expect(shiftedAfterCol?.coord).toBe('$C$3');
+    expect(shiftedAfterCol?.coord).toBe('C3');
 
     const commAfterCol = await db.comments.get(comm.id);
-    expect(commAfterCol?.cellCoord).toBe('$C$3');
+    expect(commAfterCol?.cellCoord).toBe('C3');
 
     const map2CellAfterCol = await db.cells.get(map2CellA1!.id);
     const pinAfterCol = map2CellAfterCol?.markers.find(
       (m) => m.id === warpPin.id
     );
-    expect(pinAfterCol?.shortLabel).toBe('⇄ F01 $C$3');
+    expect(pinAfterCol?.shortLabel).toBe('⇄ F01 C3');
 
-    // 3. Delete the inserted row (index 1) and column (index 1) -> returns to $B$2
+    // 3. Delete the inserted row (index 1) and column (index 1) -> returns to B2
     await deleteRowAt(initialMapId, 1);
     await deleteColAt(initialMapId, 1);
 
     const restoredCell = await db.cells.get(cellB2!.id);
-    expect(restoredCell?.coord).toBe('$B$2');
+    expect(restoredCell?.coord).toBe('B2');
 
     const restoredComm = await db.comments.get(comm.id);
-    expect(restoredComm?.cellCoord).toBe('$B$2');
+    expect(restoredComm?.cellCoord).toBe('B2');
 
     const map2CellRestored = await db.cells.get(map2CellA1!.id);
     const pinRestored = map2CellRestored?.markers.find(
       (m) => m.id === warpPin.id
     );
-    expect(pinRestored?.shortLabel).toBe('⇄ F01 $B$2');
+    expect(pinRestored?.shortLabel).toBe('⇄ F01 B2');
   });
 
   it('swaps/moves cells while preserving UUIDs and syncing comments & doorway passages', async () => {
@@ -160,19 +160,19 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
 
     expect(cellA1 && cellB1 && cellD4).toBeDefined();
 
-    // Toggle right passage on $A$1 -> should mirror left passage on $B$1
+    // Toggle right passage on A1 -> should mirror left passage on B1
     await toggleCellPassage(cellA1!.id, 'right');
     const a1Updated = await db.cells.get(cellA1!.id);
     const b1Updated = await db.cells.get(cellB1!.id);
     expect(a1Updated?.openPassages?.right).toBe(true);
     expect(b1Updated?.openPassages?.left).toBe(true);
 
-    // Add room name & comment to $A$1, then swap $A$1 with $D$4
+    // Add room name & comment to A1, then swap A1 with D4
     await updateCellMetadata(cellA1!.id, { roomName: 'Entrance Gate' });
     const comm = await createCommentEntry({
       mapId: initialMapId,
       cellId: cellA1!.id,
-      cellCoord: '$A$1',
+      cellCoord: 'A1',
       category: 'npc',
       speakerOrTitle: 'NPC Xelpud',
       content: 'Welcome to Eg-Lana!',
@@ -183,21 +183,21 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
     await swapOrMoveCells(cellA1!.id, cellD4!.id);
 
     const movedCell = await db.cells.get(cellA1!.id);
-    expect(movedCell?.coord).toBe('$D$4');
+    expect(movedCell?.coord).toBe('D4');
     expect(movedCell?.row).toBe(3);
     expect(movedCell?.col).toBe(3);
     expect(movedCell?.roomName).toBe('Entrance Gate');
 
     const movedComm = await db.comments.get(comm.id);
     expect(movedComm?.cellId).toBe(cellA1!.id);
-    expect(movedComm?.cellCoord).toBe('$D$4');
+    expect(movedComm?.cellCoord).toBe('D4');
   });
 
   it('migrates comments across maps/cells and atomically renames/deletes Room Flags & Custom Field Options', async () => {
     const map2 = await createMapPage('IdA', 'Immortal Battlefield', 5, 5);
     const map2CellC2 = await db.cells
       .where('[mapId+coord]')
-      .equals([map2.id, '$C$2'])
+      .equals([map2.id, 'C2'])
       .first();
     expect(map2CellC2).toBeDefined();
 
@@ -235,7 +235,7 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
 
     const comm = await createCommentEntry({
       mapId: initialMapId,
-      cellCoord: '$A$1',
+      cellCoord: 'A1',
       category: 'tablet',
       content: 'The giants built this tower.',
       customFields: { 'field-tribe': 'Jotunn' },
@@ -252,7 +252,7 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
     const commAfterOptionRename = await db.comments.get(comm.id);
     expect(commAfterOptionRename?.customFields?.['field-tribe']).toBe('Jotnar');
 
-    // 3. Migrate comment to map2 $C$2 via updateCommentEntry
+    // 3. Migrate comment to map2 C2 via updateCommentEntry
     await updateCommentEntry(comm.id, {
       mapId: map2.id,
       cellCoord: 'c2',
@@ -260,7 +260,7 @@ describe('IndexedDB Repository & Backup Integration Suite', () => {
 
     const migratedComm = await db.comments.get(comm.id);
     expect(migratedComm?.mapId).toBe(map2.id);
-    expect(migratedComm?.cellCoord).toBe('$C$2');
+    expect(migratedComm?.cellCoord).toBe('C2');
     expect(migratedComm?.cellId).toBe(map2CellC2!.id);
   });
 

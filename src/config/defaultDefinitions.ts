@@ -67,7 +67,7 @@ export const DEFAULT_MARKER_DEFINITIONS: MarkerDefinition[] = [
   {
     id: 'warp_door',
     name: 'Warp / Transition',
-    description: 'Teleport portals, doors, or cross-map transitions (e.g., -> AcB $A$8).',
+    description: 'Teleport portals, doors, or cross-map transitions (e.g., -> AcB A8).',
     iconKey: 'warp',
     defaultColor: '#06b6d4', // Cyan
     showShortLabelOnMacro: true,
@@ -100,7 +100,7 @@ export const DEFAULT_COMMENT_CATEGORIES: CommentCategoryDefinition[] = [
   {
     id: 'shortcut_hint',
     code: 'Sk',
-    name: 'Shortcut / Hint',
+    name: 'Skeleton',
     badgeColor: '#06b6d4', // Cyan
     supportsResolved: false,
   },

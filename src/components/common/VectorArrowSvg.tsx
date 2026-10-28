@@ -14,6 +14,7 @@ interface VectorArrowSvgProps {
   draftColor?: string;
   draftDashed?: boolean;
   draftBidirectional?: boolean;
+  draftHasArrowhead?: boolean;
   interactive?: boolean;
   selectedArrowId?: string | null;
   onSelectArrow?: (arrowId: string) => void;
@@ -26,6 +27,7 @@ export const VectorArrowSvg: React.FC<VectorArrowSvgProps> = ({
   draftColor = '#06b6d4',
   draftDashed = false,
   draftBidirectional = false,
+  draftHasArrowhead = true,
   interactive = false,
   selectedArrowId = null,
   onSelectArrow,
@@ -115,9 +117,15 @@ export const VectorArrowSvg: React.FC<VectorArrowSvgProps> = ({
               strokeDasharray={arrow.dashed ? '2.5, 1.8' : undefined}
               strokeLinecap="round"
               strokeLinejoin="round"
-              markerEnd={`url(#arrow-end-${arrow.id})`}
+              markerEnd={
+                arrow.hasArrowhead !== false
+                  ? `url(#arrow-end-${arrow.id})`
+                  : undefined
+              }
               markerStart={
-                arrow.bidirectional ? `url(#arrow-start-${arrow.id})` : undefined
+                arrow.hasArrowhead !== false && arrow.bidirectional
+                  ? `url(#arrow-start-${arrow.id})`
+                  : undefined
               }
             />
             {/* Invisible wider hit target when interactive */}
@@ -164,8 +172,12 @@ export const VectorArrowSvg: React.FC<VectorArrowSvgProps> = ({
           stroke={draftColor}
           strokeWidth={strokeWidth}
           strokeDasharray={draftDashed ? '2.5, 1.8' : undefined}
-          markerEnd="url(#arrow-draft-end)"
-          markerStart={draftBidirectional ? 'url(#arrow-draft-end)' : undefined}
+          markerEnd={draftHasArrowhead ? 'url(#arrow-draft-end)' : undefined}
+          markerStart={
+            draftHasArrowhead && draftBidirectional
+              ? 'url(#arrow-draft-end)'
+              : undefined
+          }
         />
       )}
     </svg>

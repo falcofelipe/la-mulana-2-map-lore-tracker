@@ -79,12 +79,78 @@ export async function ensureDatabaseInitialized(): Promise<void> {
 
         const nextCustomFields = [...(existingConfig.customCommentFields || [])];
 
+        // Auto-upgrade legacy "Shortcut / Hint" category to "Skeleton" and strip "(' = ...)" from marker names
+        const nextCommentCategories = (existingConfig.commentCategories || []).map(
+          (cat) => {
+            if (cat.code === 'Sk' && cat.name === 'Shortcut / Hint') {
+              needsConfigUpdate = true;
+              return { ...cat, name: 'Skeleton' };
+            }
+            return cat;
+          }
+        );
+
+        const nextMarkerDefinitions = (existingConfig.markerDefinitions || []).map(
+          (def) => {
+            const cleanedName = def.name
+              .replace(/\s*\('?\s*=\s*[^)]+\)/gi, '')
+              .trim();
+            if (cleanedName !== def.name) {
+              needsConfigUpdate = true;
+              return { ...def, name: cleanedName };
+            }
+            return def;
+          }
+        );
+
+        // Strip legacy '$' signs from cell coordinates and pin labels (e.g. "$G$1" -> "G1")
+        const allCells = await db.cells.toArray();
+        const cellsToClean: GridCell[] = [];
+        for (const cell of allCells) {
+          const cleanCoord = cell.coord.replace(/\$/g, '');
+          let markersChanged = false;
+          const nextMarkers = cell.markers.map((m) => {
+            if (m.shortLabel && m.shortLabel.includes('$')) {
+              const cleanedLabel = m.shortLabel.replace(
+                /\$([A-Z]+)\$(\d+)/g,
+                '$1$2'
+              );
+              if (cleanedLabel !== m.shortLabel) {
+                markersChanged = true;
+                return { ...m, shortLabel: cleanedLabel };
+              }
+            }
+            return m;
+          });
+          if (cleanCoord !== cell.coord || markersChanged) {
+            cellsToClean.push({
+              ...cell,
+              coord: cleanCoord,
+              markers: nextMarkers,
+            });
+          }
+        }
+        if (cellsToClean.length > 0) {
+          await db.cells.bulkPut(cellsToClean);
+        }
+
         // If an older local DB had legacy raceOrTribeOptions or comment.raceOrTribe values,
         // migrate them into a filterable Custom Select Field so no user data is lost.
         const legacyOptions = existingConfig.raceOrTribeOptions || [];
         const allComments = (await db.comments.toArray()) as (CommentEntry & {
           raceOrTribe?: string;
         })[];
+        const commentsWithDollarCoords = allComments.filter((c) =>
+          c.cellCoord?.includes('$')
+        );
+        if (commentsWithDollarCoords.length > 0) {
+          await db.comments.bulkPut(
+            commentsWithDollarCoords.map((c) => ({
+              ...c,
+              cellCoord: c.cellCoord.replace(/\$/g, ''),
+            }))
+          );
+        }
         const commentsWithLegacyRace = allComments.filter((c) =>
           Boolean(c.raceOrTribe?.trim())
         );
@@ -137,6 +203,8 @@ export async function ensureDatabaseInitialized(): Promise<void> {
           const { raceOrTribeOptions: _removed, ...cleanConfig } = existingConfig;
           await db.config.put({
             ...cleanConfig,
+            commentCategories: nextCommentCategories,
+            markerDefinitions: nextMarkerDefinitions,
             roomFlagOptions: nextRoomFlags,
             customCommentFields: nextCustomFields,
           });

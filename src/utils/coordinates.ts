@@ -30,16 +30,16 @@ export function letterToColIndex(letters: string): number {
 }
 
 /**
- * Formats 0-based (row, col) indices into an Excel-style absolute coordinate string (e.g., "$C$2").
+ * Formats 0-based (row, col) indices into a clean grid coordinate string (e.g., "C2").
  */
 export function formatCellCoord(row: number, col: number): string {
   const colLetter = colIndexToLetter(col);
   const rowNumber = row + 1;
-  return `$${colLetter}$${rowNumber}`;
+  return `${colLetter}${rowNumber}`;
 }
 
 /**
- * Parses an Excel coordinate string (e.g., "$C$2" or "C2") into 0-based { row, col }.
+ * Parses an Excel coordinate string (e.g., "C2" or "$C$2") into 0-based { row, col }.
  * Returns null if the string is not a valid coordinate.
  */
 export function parseCellCoord(coord: string): { row: number; col: number } | null {
@@ -52,7 +52,7 @@ export function parseCellCoord(coord: string): { row: number; col: number } | nu
 
 /**
  * Normalizes user coordinate input (e.g., "c2", "C2", "$C2", "$C$2") into
- * canonical "$C$2" format if valid, or returns the uppercased trimmed string.
+ * canonical "C2" format if valid, or returns the uppercased trimmed string.
  */
 export function normalizeCellCoord(input: string): string {
   const parsed = parseCellCoord(input);

@@ -111,6 +111,7 @@ export interface VectorArrow {
   color: string;            // Hex color (e.g. '#06b6d4' cyan, '#22c55e' green, '#f97316' orange)
   bidirectional: boolean;
   dashed: boolean;
+  hasArrowhead?: boolean;   // Defaults to true; when false, renders a plain solid/dashed vector line without arrowheads
   label?: string;
 }
 
