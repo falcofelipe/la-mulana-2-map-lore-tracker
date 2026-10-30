@@ -108,6 +108,7 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
     async () => {
       const cells = await db.cells.where('mapId').equals(mapId).toArray();
       const comments = await db.comments.where('mapId').equals(mapId).toArray();
+      const sketches = await db.sketches.where('mapId').equals(mapId).toArray();
 
       // Collect associated blob IDs to clean up disk space
       const blobIdsToDelete: string[] = [];
@@ -118,6 +119,9 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
       for (const comm of comments) {
         blobIdsToDelete.push(...comm.attachmentBlobIds);
       }
+      for (const sketch of sketches) {
+        if (sketch.imageBlobId) blobIdsToDelete.push(sketch.imageBlobId);
+      }
 
       if (blobIdsToDelete.length > 0) {
         await db.blobs.bulkDelete(blobIdsToDelete);
@@ -125,6 +129,7 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
 
       await db.cells.where('mapId').equals(mapId).delete();
       await db.comments.where('mapId').equals(mapId).delete();
+      await db.sketches.where('mapId').equals(mapId).delete();
       await db.maps.delete(mapId);
 
       const remaining = await db.maps.orderBy('order').toArray();
@@ -377,15 +382,28 @@ export async function deleteRowAt(
       const cellsToShift = existingCells.filter((c) => c.row > deleteRowIndex);
 
       const removedIds = new Set(cellsToRemove.map((c) => c.id));
+      const removedCoords = new Set(cellsToRemove.map((c) => c.coord));
+      const commentsToRemove = mapComments.filter(
+        (comm) =>
+          (comm.cellId && removedIds.has(comm.cellId)) ||
+          (!comm.cellId && removedCoords.has(comm.cellCoord))
+      );
+
       const blobIdsToDelete: string[] = [];
       for (const c of cellsToRemove) {
         if (c.screenshotBlobId) blobIdsToDelete.push(c.screenshotBlobId);
         if (c.thumbnailBlobId) blobIdsToDelete.push(c.thumbnailBlobId);
       }
+      for (const comm of commentsToRemove) {
+        blobIdsToDelete.push(...comm.attachmentBlobIds);
+      }
       if (blobIdsToDelete.length > 0) {
         await db.blobs.bulkDelete(blobIdsToDelete);
       }
 
+      if (commentsToRemove.length > 0) {
+        await db.comments.bulkDelete(commentsToRemove.map((c) => c.id));
+      }
       await db.cells.bulkDelete(Array.from(removedIds));
 
       if (cellsToShift.length > 0) {
@@ -466,15 +484,28 @@ export async function deleteColAt(
       const cellsToShift = existingCells.filter((c) => c.col > deleteColIndex);
 
       const removedIds = new Set(cellsToRemove.map((c) => c.id));
+      const removedCoords = new Set(cellsToRemove.map((c) => c.coord));
+      const commentsToRemove = mapComments.filter(
+        (comm) =>
+          (comm.cellId && removedIds.has(comm.cellId)) ||
+          (!comm.cellId && removedCoords.has(comm.cellCoord))
+      );
+
       const blobIdsToDelete: string[] = [];
       for (const c of cellsToRemove) {
         if (c.screenshotBlobId) blobIdsToDelete.push(c.screenshotBlobId);
         if (c.thumbnailBlobId) blobIdsToDelete.push(c.thumbnailBlobId);
       }
+      for (const comm of commentsToRemove) {
+        blobIdsToDelete.push(...comm.attachmentBlobIds);
+      }
       if (blobIdsToDelete.length > 0) {
         await db.blobs.bulkDelete(blobIdsToDelete);
       }
 
+      if (commentsToRemove.length > 0) {
+        await db.comments.bulkDelete(commentsToRemove.map((c) => c.id));
+      }
       await db.cells.bulkDelete(Array.from(removedIds));
 
       if (cellsToShift.length > 0) {

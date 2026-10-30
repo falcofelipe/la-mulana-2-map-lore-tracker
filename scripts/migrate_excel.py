@@ -427,6 +427,69 @@ COMMENT_CATEGORIES = [
     {'id': 'general', 'code': 'NOTE', 'name': 'General Note', 'badgeColor': '#94a3b8', 'supportsResolved': False},
 ]
 
+def sanitize_migrated_payload(payload):
+    """
+    Applies one-off migration normalizations directly to the exported backup payload
+    (formerly run on app startup in database.ts):
+    - Strips legacy '$' signs from cell coordinates, pin shortLabels, and comment cellCoords
+    - Strips "(' = ...)" annotations from marker definition names
+    - Ensures 'Sk' comment category is named 'Skeleton'
+    - Migrates any legacy raceOrTribeOptions / comment.raceOrTribe values into the
+      filterable Custom Select Field ('field-race-tribe')
+    """
+    config = payload.get('config', {})
+
+    # 1. Clean marker definition names and comment category names
+    for m_def in config.get('markerDefinitions', []):
+        m_def['name'] = re.sub(r"\s*\('?\s*=\s*[^)]+\)", "", m_def.get('name', ''), flags=re.IGNORECASE).strip()
+
+    for cat in config.get('commentCategories', []):
+        if cat.get('code') == 'Sk' and cat.get('name') == 'Shortcut / Hint':
+            cat['name'] = 'Skeleton'
+
+    # 2. Strip '$' from cell coordinates and pin shortLabels
+    for cell in payload.get('cells', []):
+        if 'coord' in cell and cell['coord']:
+            cell['coord'] = cell['coord'].replace('$', '')
+        for pin in cell.get('markers', []):
+            if pin.get('shortLabel') and '$' in pin['shortLabel']:
+                pin['shortLabel'] = re.sub(r'\$([A-Z]+)\$(\d+)', r'\1\2', pin['shortLabel'])
+
+    # 3. Strip '$' from comment cellCoords and fold any legacy raceOrTribe into customFields
+    legacy_options = list(config.pop('raceOrTribeOptions', []) or [])
+    custom_fields = config.setdefault('customCommentFields', [])
+    race_field = next(
+        (f for f in custom_fields if f.get('id') in ('field-race-tribe', 'cf-race-tribe') or f.get('name', '').lower() == 'race / tribe'),
+        None
+    )
+
+    for comm in payload.get('comments', []):
+        if 'cellCoord' in comm and comm['cellCoord']:
+            comm['cellCoord'] = comm['cellCoord'].replace('$', '')
+        legacy_race = (comm.pop('raceOrTribe', None) or '').strip()
+        if legacy_race:
+            legacy_options.append(legacy_race)
+            if race_field is None:
+                race_field = {
+                    'id': 'field-race-tribe',
+                    'name': 'Race / Tribe',
+                    'type': 'select',
+                    'options': [],
+                    'showInTable': True,
+                    'filterable': True,
+                }
+                custom_fields.append(race_field)
+            cf = comm.setdefault('customFields', {})
+            cf.setdefault(race_field['id'], legacy_race)
+
+    if race_field is not None and legacy_options:
+        merged_opts = sorted(set((race_field.get('options') or []) + legacy_options))
+        race_field['options'] = merged_opts
+        race_field['filterable'] = True
+
+    return payload
+
+
 def normalize_race_tribe(raw_val):
     if not raw_val:
         return ""
@@ -1503,7 +1566,7 @@ def main():
             'updatedAt': now_ms,
         }
 
-        payload = {
+        payload = sanitize_migrated_payload({
             'version': 1,
             'exportedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t0)),
             'config': config_obj,
@@ -1512,7 +1575,7 @@ def main():
             'comments': comments_list,
             'sketches': sketches_list,
             'blobMeta': blob_meta_list,
-        }
+        })
 
         out_zip.writestr('project-data.json', json.dumps(payload, indent=2))
 
