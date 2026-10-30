@@ -17,6 +17,7 @@ import {
 } from '../types/models';
 import { createDefaultProjectConfig } from '../config/defaultDefinitions';
 import { db } from './database';
+import { commandDispatcher } from './repository';
 
 interface BackupJsonPayload {
   version: number;
@@ -129,26 +130,28 @@ export async function importFullBackupZip(
     }
   }
 
-  await db.transaction(
-    'rw',
-    [db.config, db.maps, db.cells, db.comments, db.sketches, db.blobs],
-    async () => {
-      await db.config.clear();
-      await db.maps.clear();
-      await db.cells.clear();
-      await db.comments.clear();
-      await db.sketches.clear();
-      await db.blobs.clear();
+  await commandDispatcher.replaceDatabase(() =>
+    db.transaction(
+      'rw',
+      [db.config, db.maps, db.cells, db.comments, db.sketches, db.blobs],
+      async () => {
+        await db.config.clear();
+        await db.maps.clear();
+        await db.cells.clear();
+        await db.comments.clear();
+        await db.sketches.clear();
+        await db.blobs.clear();
 
-      await db.config.put(payload.config || createDefaultProjectConfig());
-      await db.maps.bulkPut(payload.maps);
-      await db.cells.bulkPut(payload.cells);
-      await db.comments.bulkPut(payload.comments || []);
-      await db.sketches.bulkPut(payload.sketches || []);
-      if (restoredBlobs.length > 0) {
-        await db.blobs.bulkPut(restoredBlobs);
+        await db.config.put(payload.config || createDefaultProjectConfig());
+        await db.maps.bulkPut(payload.maps);
+        await db.cells.bulkPut(payload.cells);
+        await db.comments.bulkPut(payload.comments || []);
+        await db.sketches.bulkPut(payload.sketches || []);
+        if (restoredBlobs.length > 0) {
+          await db.blobs.bulkPut(restoredBlobs);
+        }
       }
-    }
+    )
   );
 
   return payload.maps[0]?.id || null;
