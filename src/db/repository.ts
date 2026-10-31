@@ -132,6 +132,17 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
       await db.sketches.where('mapId').equals(mapId).delete();
       await db.maps.delete(mapId);
 
+      // Scrub references by the removed ID set (not by existence), so a
+      // recreated blank map reusing deterministic IDs is never re-linked.
+      await scrubReferencesToRemovedEntities(
+        {
+          cellIds: new Set(cells.map((c) => c.id)),
+          commentIds: new Set(comments.map((c) => c.id)),
+          mapIds: new Set([mapId]),
+        },
+        Date.now()
+      );
+
       const remaining = await db.maps.orderBy('order').toArray();
       if (remaining.length === 0) {
         const { map, cells: blankCells } = createBlankInitialMap();
@@ -142,6 +153,106 @@ export async function deleteMapPage(mapId: string): Promise<string | null> {
       return remaining[0].id;
     }
   );
+}
+
+/**
+ * IDs of entities removed by a deletion operation, used to scrub every
+ * cross-reference that pointed at them.
+ */
+interface RemovedEntityIds {
+  cellIds?: Set<string>;
+  commentIds?: Set<string>;
+  mapIds?: Set<string>;
+}
+
+/**
+ * Removes references to deleted cells, comments, and maps from the remaining
+ * pins (`linkedCommentId`, `targetCellId`, `targetMapId`), comments
+ * (`relatedCommentIds`, `relatedCellIds`), and maps (`manualOutgoingMapIds`).
+ *
+ * Must run inside the caller's transaction AFTER the deletions (and any
+ * coordinate shifts) have been written, so it always works on fresh records
+ * and never resurrects deleted rows. Only records that actually change are
+ * rewritten.
+ */
+async function scrubReferencesToRemovedEntities(
+  removed: RemovedEntityIds,
+  now: number
+): Promise<void> {
+  const cellIds = removed.cellIds ?? new Set<string>();
+  const commentIds = removed.commentIds ?? new Set<string>();
+  const mapIds = removed.mapIds ?? new Set<string>();
+  if (cellIds.size === 0 && commentIds.size === 0 && mapIds.size === 0) return;
+
+  // 1. Pins on surviving cells
+  const allCells = await db.cells.toArray();
+  const cellsToUpdate: GridCell[] = [];
+  for (const cell of allCells) {
+    if (cell.markers.length === 0) continue;
+    let changed = false;
+    const nextMarkers = cell.markers.map((pin) => {
+      const dropLink = Boolean(
+        pin.linkedCommentId && commentIds.has(pin.linkedCommentId)
+      );
+      const dropMap = Boolean(pin.targetMapId && mapIds.has(pin.targetMapId));
+      const dropCell =
+        Boolean(pin.targetCellId) &&
+        (dropMap || cellIds.has(pin.targetCellId as string));
+      if (!dropLink && !dropMap && !dropCell) return pin;
+
+      changed = true;
+      const next: PinMarker = { ...pin };
+      if (dropLink) delete next.linkedCommentId;
+      if (dropMap) delete next.targetMapId;
+      if (dropCell) delete next.targetCellId;
+      return next;
+    });
+    if (changed) {
+      cellsToUpdate.push({ ...cell, markers: nextMarkers, updatedAt: now });
+    }
+  }
+  if (cellsToUpdate.length > 0) {
+    await db.cells.bulkPut(cellsToUpdate);
+  }
+
+  // 2. Comment cross-references on surviving comments
+  if (cellIds.size > 0 || commentIds.size > 0) {
+    const allComments = await db.comments.toArray();
+    const commentsToUpdate: CommentEntry[] = [];
+    for (const comm of allComments) {
+      const related = comm.relatedCommentIds || [];
+      const relatedCells = comm.relatedCellIds || [];
+      const nextRelated = related.filter((id) => !commentIds.has(id));
+      const nextRelatedCells = relatedCells.filter((id) => !cellIds.has(id));
+      if (
+        nextRelated.length === related.length &&
+        nextRelatedCells.length === relatedCells.length
+      ) {
+        continue;
+      }
+      commentsToUpdate.push({
+        ...comm,
+        relatedCommentIds: nextRelated,
+        relatedCellIds: nextRelatedCells,
+        updatedAt: now,
+      });
+    }
+    if (commentsToUpdate.length > 0) {
+      await db.comments.bulkPut(commentsToUpdate);
+    }
+  }
+
+  // 3. Manual map-level connections on surviving maps
+  if (mapIds.size > 0) {
+    const allMaps = await db.maps.toArray();
+    for (const map of allMaps) {
+      const existing = map.manualOutgoingMapIds || [];
+      const next = existing.filter((id) => !mapIds.has(id));
+      if (next.length !== existing.length) {
+        await db.maps.update(map.id, { manualOutgoingMapIds: next });
+      }
+    }
+  }
 }
 
 /**
@@ -450,6 +561,15 @@ export async function deleteRowAt(
         (a) => !removedIds.has(a.fromCellId) && !removedIds.has(a.toCellId)
       );
 
+      // Runs after the shift writes so it reads fresh (shifted) records
+      await scrubReferencesToRemovedEntities(
+        {
+          cellIds: removedIds,
+          commentIds: new Set(commentsToRemove.map((c) => c.id)),
+        },
+        now
+      );
+
       await db.maps.update(mapId, {
         rows: map.rows - 1,
         gridArrows: nextGridArrows,
@@ -550,6 +670,15 @@ export async function deleteColAt(
 
       const nextGridArrows = (map.gridArrows || []).filter(
         (a) => !removedIds.has(a.fromCellId) && !removedIds.has(a.toCellId)
+      );
+
+      // Runs after the shift writes so it reads fresh (shifted) records
+      await scrubReferencesToRemovedEntities(
+        {
+          cellIds: removedIds,
+          commentIds: new Set(commentsToRemove.map((c) => c.id)),
+        },
+        now
       );
 
       await db.maps.update(mapId, {
@@ -1098,13 +1227,20 @@ export async function updateCommentEntry(
 }
 
 export async function deleteCommentEntry(commentId: string): Promise<void> {
-  const comm = await db.comments.get(commentId);
-  if (!comm) return;
+  await db.transaction('rw', [db.comments, db.blobs, db.cells], async () => {
+    const comm = await db.comments.get(commentId);
+    if (!comm) return;
 
-  if (comm.attachmentBlobIds.length > 0) {
-    await db.blobs.bulkDelete(comm.attachmentBlobIds);
-  }
-  await db.comments.delete(commentId);
+    if (comm.attachmentBlobIds.length > 0) {
+      await db.blobs.bulkDelete(comm.attachmentBlobIds);
+    }
+    await db.comments.delete(commentId);
+
+    await scrubReferencesToRemovedEntities(
+      { commentIds: new Set([commentId]) },
+      Date.now()
+    );
+  });
 }
 
 export async function attachImageToComment(
